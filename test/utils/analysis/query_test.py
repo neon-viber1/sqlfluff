@@ -247,9 +247,19 @@ WHERE EXISTS(
     WHERE agent1.agent_code <> customer.agent_code);""",
             {
                 "selectables": [
-                    """SELECT customer.cust_id FROM customer
+                    """DELETE FROM agent1
+WHERE EXISTS(
+    SELECT customer.cust_id FROM customer
+    WHERE agent1.agent_code <> customer.agent_code)"""
+                ],
+                "subqueries": [
+                    {
+                        "selectables": [
+                            """SELECT customer.cust_id FROM customer
     WHERE agent1.agent_code <> customer.agent_code"""
-                ]
+                        ]
+                    }
+                ],
             },
         ),
         # Test an UPDATE
@@ -264,12 +274,26 @@ SET row_sum = (
 )""",
             {
                 "selectables": [
-                    """SELECT COUNT(*) AS row_sum
+                    """UPDATE my_table
+SET row_sum = (
+    SELECT COUNT(*) AS row_sum
+    FROM
+        another_table
+    WHERE
+        another_table.id = my_tableeee.id
+)"""
+                ],
+                "subqueries": [
+                    {
+                        "selectables": [
+                            """SELECT COUNT(*) AS row_sum
     FROM
         another_table
     WHERE
         another_table.id = my_tableeee.id"""
-                ]
+                        ]
+                    }
+                ],
             },
         ),
     ],
@@ -309,3 +333,211 @@ join (
         "ctes": {"D": {"selectables": ["select x, z from b"]}},
         "query_type": "WithCompound",
     }
+
+
+@pytest.mark.parametrize(
+    "dialect, sql, expected_aliases, expected_references, child_aliases",
+    [
+        ("ansi", "UPDATE orders SET val = 1", ["orders"], ["orders"], []),
+        ("ansi", "DELETE FROM orders", ["orders"], ["orders"], []),
+        (
+            "ansi",
+            "MERGE INTO orders t USING shipments s ON t.id = s.id "
+            "WHEN MATCHED THEN UPDATE SET val = s.val",
+            ["t", "s"],
+            ["orders", "shipments"],
+            [],
+        ),
+        (
+            "postgres",
+            "DELETE FROM orders o USING shipments s JOIN packages p ON s.id = p.id "
+            "WHERE EXISTS (SELECT 1 FROM aux a WHERE a.id = p.id)",
+            ["o", "s", "p"],
+            ["orders", "shipments", "packages"],
+            ["a"],
+        ),
+        (
+            "postgres",
+            "UPDATE orders o SET status = (SELECT l.status FROM line_items l "
+            "WHERE l.order_id = o.id) RETURNING status AS returned",
+            ["o"],
+            ["orders"],
+            ["l"],
+        ),
+        (
+            "postgres",
+            "UPDATE orders SET status = s.status FROM shipments s "
+            "WHERE EXISTS (SELECT 1 FROM items i WHERE i.id = s.id)",
+            ["orders", "s"],
+            ["orders", "shipments"],
+            ["i"],
+        ),
+        (
+            "postgres",
+            "DELETE FROM orders o USING shipments s, packages p "
+            "WHERE EXISTS (SELECT 1 FROM items i WHERE i.id = o.id) "
+            "RETURNING o.id AS returned",
+            ["o", "s", "p"],
+            ["orders", "shipments", "packages"],
+            ["i"],
+        ),
+        (
+            "postgres",
+            "DELETE FROM orders USING (SELECT id FROM shipments hidden) s "
+            "WHERE orders.id = s.id RETURNING orders.id AS returned",
+            ["orders", "s"],
+            ["orders", None],
+            ["hidden"],
+        ),
+        (
+            "tsql",
+            "MERGE INTO orders t USING (SELECT * FROM staging hidden) s "
+            "ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.val = "
+            "(SELECT max(a.x) FROM aux a WHERE a.id = t.id);",
+            ["t", "s"],
+            ["orders", None],
+            ["hidden", "a"],
+        ),
+        (
+            "ansi",
+            "MERGE INTO orders t USING shipments s ON t.id = s.id "
+            "WHEN MATCHED THEN UPDATE SET val = "
+            "(SELECT a.val FROM aux a WHERE a.id = s.id)",
+            ["t", "s"],
+            ["orders", "shipments"],
+            ["a"],
+        ),
+        (
+            "mysql",
+            "UPDATE orders o JOIN shipments s ON o.id = s.id "
+            "SET o.val = (SELECT a.val FROM aux a WHERE a.id = s.id)",
+            ["o", "s"],
+            ["orders", "shipments"],
+            ["a"],
+        ),
+        (
+            "mysql",
+            "UPDATE orders, shipments s SET orders.val = "
+            "(SELECT a.val FROM aux a WHERE a.id = s.id)",
+            ["s", "orders"],
+            ["shipments", "orders"],
+            ["a"],
+        ),
+        (
+            "tsql",
+            "UPDATE o SET val = s.val FROM orders o JOIN shipments s ON o.id = s.id "
+            "WHERE EXISTS (SELECT 1 FROM aux a WHERE a.id = o.id)",
+            ["o", "o", "s"],
+            ["o", "orders", "shipments"],
+            ["a"],
+        ),
+        (
+            "tsql",
+            "DELETE o FROM orders o JOIN shipments s ON o.id = s.id "
+            "WHERE EXISTS (SELECT 1 FROM aux a WHERE a.id = o.id)",
+            ["o", "o", "s"],
+            ["o", "orders", "shipments"],
+            ["a"],
+        ),
+        (
+            "postgres",
+            "WITH pending AS (SELECT id FROM shipments) UPDATE orders o "
+            "SET val = (SELECT p.id FROM pending p WHERE p.id = o.id)",
+            ["o"],
+            ["orders"],
+            ["p"],
+        ),
+        (
+            "postgres",
+            "UPDATE orders o SET val = 1 RETURNING "
+            "(SELECT a.val FROM aux a WHERE a.id = o.id) AS returned",
+            ["o"],
+            ["orders"],
+            ["a"],
+        ),
+        (
+            "ansi",
+            "UPDATE orders SET val = (SELECT a.val FROM aux a WHERE a.id = orders.id)",
+            ["orders"],
+            ["orders"],
+            ["a"],
+        ),
+        (
+            "postgres",
+            'DELETE FROM public.orders AS "Target" WHERE EXISTS '
+            '(SELECT 1 FROM aux a WHERE a.id = "Target".id)',
+            ["Target"],
+            ["public.orders"],
+            ["a"],
+        ),
+        (
+            "mysql",
+            "DELETE FROM o USING orders o JOIN shipments s ON o.id = s.id "
+            "WHERE EXISTS (SELECT 1 FROM aux a WHERE a.id = o.id)",
+            ["o", "s"],
+            ["orders", "shipments"],
+            ["a"],
+        ),
+        (
+            "snowflake",
+            "DELETE FROM orders o USING shipments s WHERE EXISTS "
+            "(SELECT 1 FROM aux a WHERE a.id = o.id AND a.id = s.id)",
+            ["o", "s"],
+            ["orders", "shipments"],
+            ["a"],
+        ),
+        (
+            "tsql",
+            "UPDATE TOP (10) orders WITH (ROWLOCK) SET val = "
+            "(SELECT a.val FROM aux a WHERE a.id = orders.id)",
+            ["orders"],
+            ["orders"],
+            ["a"],
+        ),
+        (
+            "postgres",
+            "UPDATE orders o SET val = s.val "
+            "FROM (SELECT val FROM aux hidden) s WHERE o.id = s.val",
+            ["o", "s"],
+            ["orders", None],
+            ["hidden"],
+        ),
+    ],
+)
+def test_dml_query_scopes(
+    dialect, sql, expected_aliases, expected_references, child_aliases
+):
+    """DML sources belong to the parent, not nested or RETURNING aliases."""
+    linter = Linter(dialect=dialect)
+    parsed = linter.parse_string(sql)
+    assert not parsed.violations
+    query = Query.from_root(parsed.tree, linter.dialect)
+    assert len(query.selectables) == 1
+    info = query.selectables[0].select_info
+    assert [alias.ref_str for alias in info.table_aliases] == expected_aliases
+    assert [
+        alias.object_reference.raw if alias.object_reference else None
+        for alias in info.table_aliases
+    ] == expected_references
+    assert len(query.subqueries) == len(child_aliases)
+    for child, expected_alias in zip(query.subqueries, child_aliases):
+        assert child.parent is query
+        assert (
+            child.selectables[0].select_info.table_aliases[0].ref_str == expected_alias
+        )
+
+
+def test_dml_cte_query_scope():
+    """A data-modifying CTE retains its own scope and nested query parents."""
+    linter = Linter(dialect="postgres")
+    parsed = linter.parse_string(
+        "WITH changed AS (UPDATE orders o SET val = "
+        "(SELECT a.val FROM aux a WHERE a.id = o.id) RETURNING o.id) "
+        "SELECT id FROM changed"
+    )
+    assert not parsed.violations
+    query = Query.from_root(parsed.tree, linter.dialect)
+    dml = query.ctes["CHANGED"]
+    assert dml.parent is query
+    assert dml.selectables[0].select_info.table_aliases[0].ref_str == "o"
+    assert dml.subqueries[0].parent is dml

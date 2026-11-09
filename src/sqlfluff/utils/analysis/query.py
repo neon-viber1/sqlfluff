@@ -1,4 +1,4 @@
-"""Tools for more complex analysis of SELECT statements."""
+"""Tools for analysis of SELECT statements and enclosing DML scopes."""
 
 import logging
 from collections.abc import Iterator
@@ -11,7 +11,9 @@ from sqlfluff.core.dialects.base import Dialect
 from sqlfluff.core.dialects.common import (
     AliasInfo,
     get_from_clause_aliases,
+    get_join_clause_aliases,
     is_qualified,
+    iter_raw_references,
 )
 from sqlfluff.core.parser import BaseSegment
 from sqlfluff.dialects.dialect_ansi import ObjectReferenceSegment
@@ -43,6 +45,8 @@ SUBSELECT_TYPES = (
     "values_clause",
 )
 
+DML_TYPES = ("update_statement", "delete_statement", "merge_statement")
+
 
 class QueryType(Enum):
     """Query type: Simple is just a query; WithCompound has CTE(s)."""
@@ -60,7 +64,7 @@ class WildcardInfo(NamedTuple):
 
 @dataclass
 class Selectable:
-    """A "SELECT" query segment."""
+    """A SELECT, VALUES, or DML query scope."""
 
     selectable: BaseSegment
     dialect: Dialect
@@ -71,26 +75,18 @@ class Selectable:
 
     @cached_property
     def select_info(self) -> Optional[SelectStatementColumnsAndTables]:
-        """Returns SelectStatementColumnsAndTables on the SELECT."""
+        """Return references and sources belonging directly to this scope."""
         if self.selectable.is_type("select_statement"):
             return get_select_statement_info(
                 self.selectable, self.dialect, early_exit=False
             )
         else:  # DML or values_clause
-            # This is a bit dodgy, but a very useful abstraction. Here, we
-            # interpret a DML or values_clause segment as if it were a SELECT.
-            # Someday, we may need to tweak this, e.g. perhaps add a separate
-            # QueryType for this (depending on the needs of the rules that use
-            # it.
-            #
-            # For more info on the syntax and behavior of VALUES and its
-            # similarity to a SELECT statement with literal values (no table
-            # source), see the "Examples" section of the Postgres docs page:
-            # (https://www.postgresql.org/docs/8.2/sql-values.html).
             values = Segments(self.selectable)
             alias_expressions = values.children(sp.is_type("alias_expression"))
             table_aliases: list[AliasInfo] = []
-            if alias_expressions:
+            if self.selectable.is_type(*DML_TYPES):
+                table_aliases = self._dml_table_aliases()
+            elif alias_expressions:
                 # A VALUES clause carries its alias as a direct child.
                 for alias_expression in alias_expressions:
                     name = (
@@ -108,22 +104,6 @@ class Selectable:
                             None,
                         )
                     )
-            elif values.children(sp.is_type("from_expression")):
-                # In some dialects (e.g. MySQL) the target table(s) of an
-                # UPDATE are parsed as from_expression(s), so their aliases live
-                # inside from_expression_elements (and join clauses, for
-                # multi-table updates) rather than as direct children. Reuse the
-                # canonical from-clause alias resolution instead of re-deriving
-                # aliases here, so joined and nested targets resolve exactly as
-                # they do in a SELECT.
-                # https://github.com/sqlfluff/sqlfluff/issues/6147
-                dialect_name = self.dialect.name if self.dialect else None
-                table_aliases = [
-                    alias
-                    for _, alias in get_from_clause_aliases(
-                        self.selectable, dialect_name
-                    )
-                ]
 
             if not table_aliases:
                 # Preserve the longstanding behavior of always registering
@@ -142,6 +122,96 @@ class Selectable:
                 using_cols=[],
                 table_reference_buffer=[],
             )
+
+    def _dml_table_aliases(self) -> list[AliasInfo]:
+        """Collect direct targets and sources without entering child scopes.
+
+        Dialects represent sources either as FROM expressions or as adjacent
+        table/alias segments. Only scan the latter in the target/USING region;
+        RETURNING aliases and expressions belong to neither kind of source.
+        """
+        dialect_name = self.dialect.name
+        aliases = [
+            alias for _, alias in get_from_clause_aliases(self.selectable, dialect_name)
+        ]
+        source: Optional[BaseSegment] = None
+        alias_expression: Optional[BaseSegment] = None
+
+        def flush() -> None:
+            nonlocal source, alias_expression
+            if source is None:
+                return
+            reference = (
+                source
+                if source.is_type("table_reference")
+                else source.get_child("table_reference")
+            )
+            identifier = (
+                alias_expression.get_child("identifier") if alias_expression else None
+            )
+            parts = (
+                list(iter_raw_references(reference, dialect_name)) if reference else []
+            )
+            aliases.append(
+                AliasInfo(
+                    identifier.raw_normalized(False)
+                    if identifier
+                    else parts[-1].part
+                    if parts
+                    else "",
+                    identifier
+                    if identifier
+                    else parts[-1].segments[0]
+                    if parts
+                    else None,
+                    bool(identifier),
+                    source,
+                    alias_expression,
+                    reference,
+                )
+            )
+            source = alias_expression = None
+
+        in_sources = True
+        in_using = False
+        for segment in self.selectable.segments:
+            if not segment.is_code:
+                continue
+            if segment.raw_upper == "RETURNING":
+                break
+            if segment.is_type("from_clause", "using_clause"):
+                flush()
+                aliases.extend(
+                    alias for _, alias in get_from_clause_aliases(segment, dialect_name)
+                )
+            elif segment.is_type("join_clause") and in_sources:
+                flush()
+                aliases.extend(
+                    alias for _, alias in get_join_clause_aliases(segment, dialect_name)
+                )
+            elif segment.raw_upper == "USING":
+                flush()
+                in_sources = True
+                in_using = True
+            elif segment.is_type(
+                "set_clause_list",
+                "where_clause",
+                "join_on_condition",
+                "merge_match",
+                "output_clause",
+            ) or segment.raw_upper in ("WHERE", "ON", "SET", "OUTPUT"):
+                flush()
+                in_sources = False
+            elif in_sources and (
+                segment.is_type("table_reference", "table_expression")
+                or (in_using and segment.is_type("bracketed", "function"))
+            ):
+                flush()
+                source = segment
+            elif in_sources and segment.is_type("alias_expression") and source:
+                alias_expression = segment
+        flush()
+        return aliases
 
     def get_wildcard_info(self) -> list[WildcardInfo]:
         """Find wildcard (*) targets in the SELECT."""
@@ -330,8 +400,7 @@ class Query(Generic[T]):
     def from_root(cls: type[T], root_segment: BaseSegment, dialect: Dialect) -> T:
         """Given a root segment, find the first appropriate selectable and analyse."""
         selectable_segment = next(
-            # Could be a Selectable or a MERGE
-            root_segment.recursive_crawl(*SELECTABLE_TYPES, "merge_statement"),
+            root_segment.recursive_crawl(*SELECTABLE_TYPES, *DML_TYPES),
             None,
         )
         assert selectable_segment, f"No selectable found in {root_segment.raw!r}."
@@ -371,6 +440,7 @@ class Query(Generic[T]):
                 # want to look straight through to those child
                 # expressions.
                 "select_statement",
+                *DML_TYPES,
                 recurse_into=False,
                 no_recursive_seg_type="common_table_expression",
             ):

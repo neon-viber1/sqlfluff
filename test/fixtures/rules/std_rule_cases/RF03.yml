@@ -1,5 +1,77 @@
 rule: RF03
 
+test_fail_no_fix_dml_update_correlated_qualified:
+  fail_str: |
+    UPDATE orders o SET val = (
+        SELECT max(val) FROM items i WHERE i.id = o.id
+    )
+  configs:
+    core:
+      dialect: postgres
+    rules:
+      references.consistent:
+        single_table_references: qualified
+
+test_pass_dml_delete_correlated_unqualified:
+  pass_str: |
+    DELETE FROM orders o USING shipments s
+    WHERE EXISTS (SELECT 1 FROM items i WHERE i.id = o.id AND i.id = s.id)
+  configs:
+    core:
+      dialect: postgres
+    rules:
+      references.consistent:
+        single_table_references: unqualified
+
+test_fail_no_fix_dml_merge_correlated_qualified:
+  fail_str: |
+    MERGE INTO orders t USING (SELECT staging.id FROM staging) s ON t.id = s.id
+    WHEN MATCHED THEN UPDATE SET val = (
+        SELECT max(val) FROM aux a WHERE a.id = t.id AND a.id = s.id
+    );
+  configs:
+    core:
+      dialect: tsql
+    rules:
+      references.consistent:
+        single_table_references: qualified
+
+test_fail_no_fix_dml_returning_correlated_qualified:
+  fail_str: |
+    UPDATE orders o SET val = 1
+    RETURNING (SELECT val FROM aux a WHERE a.id = o.id) AS returned
+  configs:
+    core:
+      dialect: postgres
+    rules:
+      references.consistent:
+        single_table_references: qualified
+
+test_fail_no_fix_dml_mysql_multi_table_update:
+  fail_str: |
+    UPDATE orders o JOIN shipments s ON o.id = s.id
+    SET o.val = (SELECT max(val) FROM aux a WHERE a.id = s.id)
+  configs:
+    core:
+      dialect: mysql
+    rules:
+      references.consistent:
+        single_table_references: qualified
+
+test_fail_dml_using_subquery_independent_qualified:
+  fail_str: |
+    MERGE INTO orders t USING (SELECT id FROM staging) s ON t.id = s.id
+    WHEN MATCHED THEN UPDATE SET val = s.id;
+  fix_str: |
+    MERGE INTO orders t USING (SELECT staging.id FROM staging) s ON t.id = s.id
+    WHEN MATCHED THEN UPDATE SET val = s.id;
+  configs:
+    core:
+      dialect: tsql
+    rules:
+      references.consistent:
+        single_table_references: qualified
+
 # Mixed qualification of references.
 test_fail_single_table_mixed_qualification_of_references:
   fail_str: SELECT my_tbl.bar, baz FROM my_tbl

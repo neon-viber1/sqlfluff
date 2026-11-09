@@ -85,27 +85,12 @@ class Rule_RF01(BaseRule):
 
     def _eval(self, context: RuleContext) -> list[LintResult]:
         violations: list[LintResult] = []
-        dml_target_table: Optional[list[tuple[str, ...]]] = None
         self.logger.debug("Trigger on: %s", context.segment)
-        if not context.segment.is_type("select_statement"):
-            # Extract first table reference. This will be the target
-            # table in a DML statement.
-            table_reference = next(
-                context.segment.recursive_crawl("table_reference"), None
-            )
-            if table_reference:
-                dml_target_table = self._table_ref_as_tuple(
-                    cast(ObjectReferenceSegment, table_reference), context.dialect
-                )
-
-        self.logger.debug("DML Reference Table: %s", dml_target_table)
         # Verify table references in any SELECT statements found in or
         # below context.segment in the parser tree.
         query: RF01Query = RF01Query.from_segment(context.segment, context.dialect)
         query.parent_stack = context.parent_stack
-        self._analyze_table_references(
-            query, dml_target_table, context.dialect, violations
-        )
+        self._analyze_table_references(query, context.dialect, violations)
         return violations
 
     def _alias_info_as_tuples(
@@ -134,7 +119,6 @@ class Rule_RF01(BaseRule):
     def _analyze_table_references(
         self,
         query: RF01Query,
-        dml_target_table: Optional[list[tuple[str, ...]]],
         dialect: Dialect,
         violations: list[LintResult],
     ) -> None:
@@ -161,16 +145,14 @@ class Rule_RF01(BaseRule):
                     if not self._should_ignore_reference(r, selectable):
                         # This function walks up the query's parent stack if necessary.
                         violation = self._resolve_reference(
-                            r, self._get_table_refs(r, dialect), dml_target_table, query
+                            r, self._get_table_refs(r, dialect), query
                         )
                         if violation:
                             violations.append(violation)
 
         # Visit children.
         for child in query.children:
-            self._analyze_table_references(
-                cast(RF01Query, child), dml_target_table, dialect, violations
-            )
+            self._analyze_table_references(cast(RF01Query, child), dialect, violations)
 
     def _should_ignore_reference(
         self, reference: ObjectReferenceSegment, selectable: Selectable
@@ -279,7 +261,6 @@ class Rule_RF01(BaseRule):
         self,
         r: ObjectReferenceSegment,
         tbl_refs: list[tuple[ObjectReferencePart, tuple[str, ...]]],
-        dml_target_table: Optional[list[tuple[str, ...]]],
         query: RF01Query,
         *,
         is_parent_lookup: bool = False,
@@ -347,15 +328,10 @@ class Rule_RF01(BaseRule):
                 return self._resolve_reference(
                     r,
                     tbl_refs,
-                    dml_target_table,
                     cast(RF01Query, query.parent),
                     is_parent_lookup=True,
                 )
-            # No parent query. If there's a DML statement at the root, check its
-            # target table or alias.
-            elif not dml_target_table or not object_ref_matches_table(
-                possible_references, dml_target_table
-            ):
+            else:
                 return LintResult(
                     # Return the first segment rather than the string
                     anchor=tbl_refs[0][0].segments[0],

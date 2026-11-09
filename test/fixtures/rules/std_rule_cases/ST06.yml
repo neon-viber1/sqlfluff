@@ -1,5 +1,37 @@
 rule: ST06
 
+test_fail_dml_update_correlated_select_order:
+  fail_str: |
+    UPDATE orders o SET val = 1 WHERE EXISTS (
+        SELECT a.val + 1, a.id FROM aux a WHERE a.id = o.id
+    )
+  fix_str: |
+    UPDATE orders o SET val = 1 WHERE EXISTS (
+        SELECT a.id, a.val + 1 FROM aux a WHERE a.id = o.id
+    )
+  configs:
+    core:
+      dialect: postgres
+
+test_pass_dml_delete_correlated_select_order:
+  pass_str: |
+    DELETE FROM orders o USING shipments s WHERE EXISTS (
+        SELECT a.id, a.val + 1 FROM aux a WHERE a.id = o.id AND a.id = s.id
+    )
+  configs:
+    core:
+      dialect: postgres
+
+test_pass_dml_merge_correlated_select_order:
+  pass_str: |
+    MERGE INTO orders t USING (SELECT id, val + 1 AS val FROM staging) s
+    ON t.id = s.id WHEN MATCHED THEN UPDATE SET val = (
+        SELECT max(a.val) FROM aux a WHERE a.id = t.id
+    );
+  configs:
+    core:
+      dialect: tsql
+
 test_pass_select_statement_order:
   pass_str: |
     select
