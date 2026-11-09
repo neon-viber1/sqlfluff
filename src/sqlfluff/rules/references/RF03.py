@@ -23,10 +23,15 @@ from sqlfluff.core.rules import (
 )
 from sqlfluff.core.rules.crawlers import SegmentSeekerCrawler
 from sqlfluff.dialects.dialect_ansi import ObjectReferenceSegment
-from sqlfluff.utils.analysis.query import Query
+from sqlfluff.utils.analysis.query import DML_TYPES, Query
 from sqlfluff.utils.analysis.select import SelectStatementColumnsAndTables
 
-_START_TYPES = ["select_statement", "set_expression", "with_compound_statement"]
+_START_TYPES = [
+    "select_statement",
+    "set_expression",
+    "with_compound_statement",
+    *DML_TYPES,
+]
 
 
 class Rule_RF03(BaseRule):
@@ -185,7 +190,7 @@ class Rule_RF03(BaseRule):
                         query.dialect.name,
                     )
                 )
-                if query.parent and query.is_subquery:
+                if query.parent and query.is_subquery and _sees_outer_columns(query):
                     if self._may_add_qualifiers or references_outer_table:
                         possible_ref_tables += outer_aliases
                     else:
@@ -202,7 +207,7 @@ class Rule_RF03(BaseRule):
                 elif references_outer_table or (
                     outer_aliases
                     and self._may_add_qualifiers
-                    and _sees_outer_columns(query.selectables[0].selectable)
+                    and _sees_outer_columns(query)
                 ):
                     possible_ref_tables += outer_aliases
                 if len(possible_ref_tables) > 1:
@@ -243,7 +248,7 @@ class Rule_RF03(BaseRule):
             yield from self._visit_queries(child, visited, templater_name)
 
 
-def _sees_outer_columns(selectable: BaseSegment) -> bool:
+def _sees_outer_columns(query: Query) -> bool:
     """Check whether a selectable can see the columns of the enclosing query.
 
     A subquery in the FROM clause can see the columns of its own query only
@@ -252,8 +257,20 @@ def _sees_outer_columns(selectable: BaseSegment) -> bool:
     defines it. Any subquery can also see the columns which its enclosing
     query can see, e.g. a derived table nested in a LATERAL subquery.
     """
+    selectable = query.selectables[0].selectable
     parent = _parent_segment(selectable)
     while parent:
+        if parent.is_type(*DML_TYPES):
+            ancestor = query.parent
+            while ancestor:
+                for scope in ancestor.selectables:
+                    if scope.selectable is parent and scope.select_info:
+                        return not any(
+                            alias.from_expression_element.path_to(selectable)
+                            for alias in scope.select_info.table_aliases
+                        )
+                ancestor = ancestor.parent
+            return False
         if parent.is_type("select_statement"):
             return True
         if parent.is_type("from_expression_element"):

@@ -1,5 +1,56 @@
 rule: RF01
 
+test_pass_dml_update_target_and_from_scopes:
+  pass_str: |
+    UPDATE orders o SET status = s.status FROM shipments s
+    WHERE EXISTS (SELECT 1 FROM items i WHERE i.id = o.id AND i.id = s.id)
+  configs:
+    core:
+      dialect: postgres
+
+test_pass_dml_delete_target_and_using_scopes:
+  pass_str: |
+    DELETE FROM orders o USING shipments s
+    WHERE EXISTS (SELECT 1 FROM items i WHERE i.id = o.id AND i.id = s.id)
+  configs:
+    core:
+      dialect: postgres
+
+test_pass_dml_merge_target_and_source_scopes:
+  pass_str: |
+    MERGE INTO orders t USING (SELECT id FROM staging hidden) s ON t.id = s.id
+    WHEN MATCHED THEN UPDATE SET val = (
+        SELECT max(a.val) FROM aux a WHERE a.id = t.id AND a.id = s.id
+    );
+  configs:
+    core:
+      dialect: tsql
+
+test_pass_dml_returning_correlated_scope:
+  pass_str: |
+    UPDATE orders o SET val = 1
+    RETURNING (SELECT a.val FROM aux a WHERE a.id = o.id) AS returned
+  configs:
+    core:
+      dialect: postgres
+
+test_fail_dml_nested_source_alias_not_visible:
+  fail_str: |
+    DELETE FROM orders o USING (SELECT id FROM shipments hidden) s
+    WHERE EXISTS (SELECT 1 FROM items i WHERE i.id = hidden.id)
+  configs:
+    core:
+      dialect: postgres
+
+test_fail_dml_returning_alias_not_visible:
+  fail_str: |
+    UPDATE orders o SET val = 1
+    WHERE EXISTS (SELECT 1 FROM items i WHERE i.id = returned.id)
+    RETURNING o.id AS returned
+  configs:
+    core:
+      dialect: postgres
+
 test_athena_struct_fields:
   pass_str: |
     SELECT metadata.value FROM source_table;
