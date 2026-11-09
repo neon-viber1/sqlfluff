@@ -692,6 +692,51 @@ def test__cli__command_lint_parse(command):
     invoke_assert_code(args=command)
 
 
+@pytest.mark.parametrize("command", ["parse", "lint"])
+@pytest.mark.parametrize("templater", ["raw", "placeholder"])
+def test__cli__oracle_package_body_dollar_identifiers(
+    command: str, templater: str, tmp_path: pathlib.Path
+) -> None:
+    """Parse Oracle dollar identifiers, including with colon placeholders."""
+    config_path = tmp_path / ".sqlfluff"
+    config_path.write_text(
+        "[sqlfluff]\n"
+        "dialect = oracle\n"
+        f"templater = {templater}\n"
+        "\n[sqlfluff:templater:placeholder]\n"
+        "param_style = colon\n",
+        encoding="utf-8",
+    )
+    command_args = [
+        "--ignore-local-config",
+        "--config",
+        str(config_path),
+        "--format",
+        "json",
+        "test/fixtures/dialects/oracle/create_package_body_dollar_identifiers.sql",
+    ]
+    if command == "lint":
+        command_args.extend(["--rules", "CP01"])
+    result = invoke_assert_code(
+        args=[parse if command == "parse" else lint, command_args], ret_code=0
+    )
+    payload = json.loads(result.stdout)
+    assert len(payload) == 1
+    if command == "lint":
+        assert payload[0]["violations"] == []
+    else:
+        assert '"unparsable"' not in result.stdout
+        for identifier in (
+            "private$helper",
+            "private$function",
+            "v_dollar$val",
+            "g_my$var",
+            "my$field",
+            "p$id",
+        ):
+            assert f'"{identifier}"' in result.stdout
+
+
 @pytest.mark.parametrize(
     "command, ret_code",
     [
