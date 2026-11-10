@@ -555,3 +555,220 @@ test_single_target_negative_max_line_length_rejoins:
   configs:
     core:
       max_line_length: -1
+
+test_group_by_multiple_same_line_fail:
+  fail_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        a, b
+  fix_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        a,
+    b
+
+test_group_by_first_item_on_keyword_line_fail:
+  fail_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY a, b
+  fix_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+    a,
+    b
+
+test_group_by_multiple_own_lines_pass:
+  pass_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        a,
+        b
+
+test_group_by_single_item_pass:
+  pass_str: |
+    SELECT
+        a,
+        count(*)
+    FROM fct
+    GROUP BY a
+
+test_group_by_all_pass:
+  pass_str: |
+    SELECT
+        a,
+        count(*)
+    FROM fct
+    GROUP BY ALL
+
+test_group_by_rollup_pass:
+  pass_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY ROLLUP(a, b)
+
+test_group_by_trailing_comment_fail:
+  fail_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        a, -- first
+        b, c
+  fix_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        a, -- first
+        b,
+    c
+
+test_group_by_function_items_fail:
+  fail_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        lower(a), coalesce(b, c)
+  fix_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        lower(a),
+    coalesce(b, c)
+
+test_group_by_subquery_fail:
+  fail_str: |
+    SELECT *
+    FROM (
+        SELECT
+            a,
+            b
+        FROM fct
+        GROUP BY
+            a, b
+    )
+  fix_str: |
+    SELECT *
+    FROM (
+        SELECT
+            a,
+            b
+        FROM fct
+        GROUP BY
+            a,
+    b
+    )
+
+test_order_by_multiple_same_line_fail:
+  fail_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    ORDER BY
+        a DESC NULLS FIRST, b
+  fix_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    ORDER BY
+        a DESC NULLS FIRST,
+    b
+
+test_order_by_single_item_pass:
+  pass_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    ORDER BY a DESC
+
+test_order_by_window_pass:
+  pass_str: |
+    SELECT
+        a,
+        row_number() OVER (PARTITION BY c ORDER BY a, b) AS rn
+    FROM fct
+
+test_order_by_function_pass:
+  pass_str: |
+    SELECT
+        a,
+        array_agg(b ORDER BY a, b) AS arr
+    FROM fct
+  configs:
+    core:
+      dialect: postgres
+
+test_group_by_bigquery_fail:
+  fail_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        a, b
+  fix_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        a,
+    b
+  configs:
+    core:
+      dialect: bigquery
+
+test_group_by_tsql_fail:
+  fail_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        a, b
+  fix_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        a,
+    b
+  configs:
+    core:
+      dialect: tsql
+
+test_group_by_jinja_list_pass:
+  pass_str: |
+    SELECT
+        a,
+        b
+    FROM fct
+    GROUP BY
+        {{ "a, b" }}
