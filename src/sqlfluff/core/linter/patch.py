@@ -290,6 +290,9 @@ def generate_source_patches(
 
     Any source fixes are generated in `_iter_templated_patches` and included
     alongside any standard fixes. That means we treat them the same here.
+
+    The complete root-render patch set is one transaction. If any patch cannot
+    be mapped safely, discard the whole set rather than part of a multi-edit fix.
     """
     # Iterate patches, filtering and translating as we go:
     linter_logger.debug("### Beginning Patch Iteration.")
@@ -346,21 +349,21 @@ def generate_source_patches(
             )
             filtered_source_patches.append(patch)
             dedupe_buffer.add(dedupe_tuple)
-        else:  # pragma: no cover
-            # We've got a situation where the ends of our patch need to be
-            # more carefully mapped. This used to happen with greedy template
-            # element matching, but should now never happen. In the event that
-            # it does, we'll warn but carry on.
+        else:
             linter_logger.warning(
-                "Skipping edit patch on uncertain templated section [%s], "
+                "Discarding all source patches due to an uncertain templated "
+                "section [%s], "
                 "Please report this warning on GitHub along with the query "
                 "that produced it.",
                 (patch.patch_category, patch.source_slice),
             )
-            continue
+            return []
 
     # Sort the patches before building up the file.
-    return sorted(filtered_source_patches, key=lambda x: x.source_slice.start)
+    return sorted(
+        filtered_source_patches,
+        key=lambda patch: (patch.source_slice.start, patch.source_slice.stop),
+    )
 
 
 def _patches_conflict(first: FixPatch, second: FixPatch) -> bool:

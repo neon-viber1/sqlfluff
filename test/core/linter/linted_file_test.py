@@ -321,3 +321,106 @@ def test__linted_file__fix_string_generates_patches_when_not_precomputed():
 
     assert changed
     assert fixed_sql == "SELECT\n    1\n"
+
+
+@pytest.mark.parametrize("patch_source", ["precomputed", "compatibility", "linter"])
+@pytest.mark.parametrize(
+    "conflict", [None, "duplicate_slice", "overlap", "insertion", "source_only"]
+)
+def test__linted_file__fix_string_applies_root_patches_atomically(
+    patch_source, conflict
+):
+    """A rejected patch must not leave another part of a multi-edit fix applied."""
+    sql = "SELECT a{# note #}, b FROM t\n"
+    config = FluffConfig(overrides={"dialect": "ansi", "rules": "CP01"})
+    linted = Linter(config=config).lint_string(sql, fix=True)
+    patches = [FixPatch(slice(8, 9), "", "literal", slice(18, 19), ",", ",")]
+    if conflict == "duplicate_slice":
+        patches += [
+            FixPatch(slice(7, 8), "a,", "literal", slice(7, 8), "a", "a"),
+            FixPatch(slice(7, 8), "c,", "literal", slice(7, 8), "a", "a"),
+        ]
+    elif conflict == "insertion":
+        patches += [
+            FixPatch(slice(8, 8), ",", "literal", slice(8, 8), "", ""),
+            FixPatch(slice(8, 8), ";", "literal", slice(8, 8), "", ""),
+        ]
+    elif conflict == "source_only":
+        patches.append(FixPatch(slice(8, 8), ",", "literal", slice(9, 9), "", ""))
+    else:
+        patches.append(FixPatch(slice(8, 8), ",", "literal", slice(8, 8), "", ""))
+        if conflict == "overlap":
+            patches.append(
+                FixPatch(slice(8, 10), ", ", "literal", slice(18, 20), ", ", ", ")
+            )
+    patches.sort(key=lambda patch: patch.source_slice.start)
+    if patch_source == "linter":
+        with mock.patch(
+            "sqlfluff.core.linter.linter.generate_source_patches", return_value=patches
+        ):
+            linted = Linter(config=config).lint_string(sql, fix=True)
+    else:
+        linted = linted._replace(
+            source_patches=patches if patch_source == "precomputed" else None
+        )
+
+    with mock.patch(
+        "sqlfluff.core.linter.linted_file.generate_source_patches", return_value=patches
+    ):
+        expected = (
+            (sql, False) if conflict else ("SELECT a,{# note #} b FROM t\n", True)
+        )
+        assert linted.fix_string() == expected
+
+
+def test__linted_file__unmappable_patch_discards_entire_root_patch_set():
+    """Source mapping must not keep only the deletion half of a comma move."""
+    sql = "SELECT a{# note #}, b FROM t\n"
+    config = FluffConfig(overrides={"dialect": "ansi", "rules": "CP01"})
+    patches = [
+        FixPatch(slice(8, 9), "", "literal", slice(18, 19), ",", ","),
+        FixPatch(slice(8, 8), ",", "literal", slice(9, 9), "", ""),
+    ]
+    with mock.patch(
+        "sqlfluff.core.linter.patch._iter_templated_patches", return_value=iter(patches)
+    ):
+        linted = Linter(config=config).lint_string(sql, fix=True)
+
+    assert linted.fix_string() == (sql, False)
+
+
+def test__linted_file__duplicate_reconstruction_slice_discards_root_patch_set():
+    """Every patch in the transaction must be applied exactly once."""
+    sql = "SELECT\n  1\n"
+    config = FluffConfig(overrides={"dialect": "ansi", "rules": "LT02"})
+    linted = Linter(config=config).lint_string(sql, fix=True)
+    assert linted.source_patches
+    duplicated_slice = linted.source_patches[0].source_slice
+
+    with mock.patch.object(
+        LintedFile,
+        "_slice_source_file_using_patches",
+        return_value=[duplicated_slice, duplicated_slice],
+    ):
+        assert linted.fix_string() == (sql, False)
+
+
+def test__linted_file__overlapping_reconstruction_discards_root_patch_set():
+    """Overlapping patches cannot be committed even if both slices are returned."""
+    sql = "SELECT a\n"
+    config = FluffConfig(overrides={"dialect": "ansi", "rules": "CP01"})
+    patches = [
+        FixPatch(slice(0, 6), "select", "source", slice(0, 6), "SELECT", "SELECT"),
+        FixPatch(slice(1, 7), "X", "source", slice(1, 7), "ELECT ", "ELECT "),
+    ]
+    linted = (
+        Linter(config=config)
+        .lint_string(sql, fix=True)
+        ._replace(source_patches=patches)
+    )
+    with mock.patch.object(
+        LintedFile,
+        "_slice_source_file_using_patches",
+        return_value=[patch.source_slice for patch in patches],
+    ):
+        assert linted.fix_string() == (sql, False)
