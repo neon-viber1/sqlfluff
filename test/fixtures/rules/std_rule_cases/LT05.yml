@@ -845,6 +845,15 @@ test_fail_no_fix_trailing_comment_with_jinja_block_after:
     indentation:
       trailing_comments: after
 
+test_fail_no_fix_trailing_comment_with_jinja_expression:
+  fail_str: "select a, b, c from tbl  -- comment{{ ' more' }} text here that goes on and on and on and on\n"
+
+test_fail_no_fix_trailing_comment_with_jinja_comment:
+  fail_str: "select a, b, c from tbl  -- note{# x #} this comment text is long enough to put the line over\n"
+
+test_pass_trailing_comment_with_jinja_comment_source_length:
+  pass_str: "select 1 -- note{# x #} this comment text is long enough to put the line over\n"
+
 test_fail_list_wrapping_fill:
   # With list_wrapping = fill, put as many elements on each line as fit.
   # The first line of the list is exactly 41 characters long.

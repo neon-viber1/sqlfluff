@@ -167,3 +167,40 @@ def auto_fix_test(dialect, folder, caplog):
 def test__std_fix_auto(dialect, folder, caplog):
     """Automated Fixing Tests."""
     auto_fix_test(dialect=dialect, folder=folder, caplog=caplog)
+
+
+@pytest.mark.parametrize(
+    "tag",
+    ["{% if true %} more{% endif %}", "{% set q = 1 %}", "{{ ' more' }}", "{# x #}"],
+)
+@pytest.mark.parametrize("trailing_comments", ["before", "after"])
+def test__std_fix_auto_templated_trailing_comment(tag, trailing_comments):
+    """Keep tagged comments intact and measure each source character once."""
+    sql = (
+        f"select a, b, c from tbl  -- comment{tag}"
+        " text here that goes on and on and on\n"
+    )
+    source_length = len(sql.rstrip("\n"))
+    for limit in (source_length - 1, source_length):
+        config = FluffConfig(
+            configs={"indentation": {"trailing_comments": trailing_comments}},
+            overrides={"dialect": "ansi", "rules": "LT05", "max_line_length": limit},
+        )
+        linter = Linter(config=config)
+        for _ in range(2):
+            linted = linter.lint_string(sql, fix=True)
+            violations = linted.get_violations()
+            if limit < source_length:
+                assert len(violations) == 1
+                violation = violations[0]
+                assert violation.rule_code() == "LT05"
+                assert not violation.fixable
+                assert violation.desc() == (
+                    f"Line is too long ({source_length} > {limit})."
+                )
+            else:
+                assert not violations
+            fixed_sql, changed = linted.fix_string()
+            assert fixed_sql == sql
+            assert not changed
+            sql = fixed_sql
