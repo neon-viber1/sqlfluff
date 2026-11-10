@@ -306,6 +306,48 @@ class BareFunctionSegment(BaseSegment):
     match_grammar = Ref("SpecialRegisterGrammar")
 
 
+class DataChangeTableReferenceSegment(BaseSegment):
+    """A table containing rows affected by an INSERT, UPDATE or DELETE.
+
+    FINAL and NEW wrap INSERT or UPDATE; OLD wraps UPDATE or DELETE.
+
+    https://www.ibm.com/docs/en/db2/11.5.x?topic=clause-table-reference
+    """
+
+    type = "data_change_table_reference"
+    match_grammar = OneOf(
+        Sequence(
+            OneOf("FINAL", "NEW"),
+            "TABLE",
+            Bracketed(
+                OneOf(
+                    Ref("InsertStatementSegment"),
+                    Ref("UpdateStatementSegment"),
+                ),
+            ),
+        ),
+        Sequence(
+            "OLD",
+            "TABLE",
+            Bracketed(
+                OneOf(
+                    Ref("UpdateStatementSegment"),
+                    Ref("DeleteStatementSegment"),
+                ),
+            ),
+        ),
+    )
+
+
+class TableExpressionSegment(ansi.TableExpressionSegment):
+    """A table expression, including Db2 data-change table references."""
+
+    match_grammar = ansi.TableExpressionSegment.match_grammar.copy(
+        insert=[Ref("DataChangeTableReferenceSegment")],
+        before=Ref("TableReferenceSegment"),
+    )
+
+
 class CallStoredProcedureSegment(BaseSegment):
     """This is a CALL statement used to execute a stored procedure.
 
