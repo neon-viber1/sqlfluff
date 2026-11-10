@@ -2110,6 +2110,10 @@ def _calculate_indent_compensation(
 def _source_char_len(elements: ReflowSequenceType) -> int:
     """Calculate length in the source file.
 
+    Overlapping source slices, such as template placeholders inside a comment,
+    contribute only once. Literal edits and source-free insertions contribute
+    their rendered length instead.
+
     NOTE: This relies heavily on the sequence already being
     split appropriately. It will raise errors if not.
 
@@ -2122,6 +2126,7 @@ def _source_char_len(elements: ReflowSequenceType) -> int:
     the source of quite a few fiddly sections.
     """
     char_len = 0
+    source_slices: list[tuple[int, int]] = []
     last_source_slice: Optional[slice] = None
     for seg in chain.from_iterable(elem.segments for elem in elements):
         # Indent tokens occasionally have strange position markers.
@@ -2148,7 +2153,9 @@ def _source_char_len(elements: ReflowSequenceType) -> int:
             # smarter about this, but for now this is ok. Without
             # an algorithm for layout out code _within_ jinja tags
             # we won't be able to suggest appropriate fixes.
-            char_len += source_str.index("\n")
+            source_slices.append(
+                (source_slice.start, source_slice.start + source_str.index("\n"))
+            )
             break
         slice_len = slice_length(source_slice)
         # Only update the length if it's a new slice.
@@ -2165,12 +2172,18 @@ def _source_char_len(elements: ReflowSequenceType) -> int:
             # Otherwise if we're literal, use the raw length
             # because it might be an edit.
             elif seg.pos_marker.is_literal():
-                char_len += len(seg.raw)
+                char_len += len(seg.raw) - slice_len
+                source_slices.append((source_slice.start, source_slice.stop))
                 last_source_slice = source_slice
             # Otherwise assume it's templated code.
             else:
-                char_len += slice_length(source_slice)
+                source_slices.append((source_slice.start, source_slice.stop))
                 last_source_slice = source_slice
+
+    source_end = 0
+    for source_start, source_stop in sorted(source_slices):
+        char_len += max(0, source_stop - max(source_start, source_end))
+        source_end = max(source_end, source_stop)
 
     return char_len
 
