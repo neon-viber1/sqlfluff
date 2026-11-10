@@ -17,6 +17,7 @@ from sqlfluff.core.parser import (
     IdentifierSegment,
     ImplicitIndent,
     Indent,
+    KeywordSegment,
     LiteralKeywordSegment,
     LiteralSegment,
     Matchable,
@@ -542,6 +543,10 @@ postgres_dialect.add(
         Sequence(Ref("TableReferenceSegment"), Ref("StarSegment")),
     ),
     RightArrowSegment=StringParser("=>", SymbolSegment, type="right_arrow"),
+    # PROVIDER is only meaningful in CREATE COLLATION, so it is matched with a
+    # StringParser rather than registered as a keyword. That way RF04 does not
+    # flag it when used as an identifier.
+    ProviderKeywordSegment=StringParser("PROVIDER", KeywordSegment, type="keyword"),
     OnKeywordAsIdentifierSegment=StringParser(
         "ON", IdentifierSegment, type="naked_identifier"
     ),
@@ -7114,7 +7119,7 @@ class CreateCollationStatementSegment(BaseSegment):
                         Ref("QuotedLiteralSegment"),
                     ),
                     Sequence(
-                        "PROVIDER",
+                        Ref("ProviderKeywordSegment"),
                         Ref("EqualsSegment"),
                         OneOf("ICU", "LIBC"),
                     ),
