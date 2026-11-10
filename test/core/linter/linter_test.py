@@ -1111,8 +1111,9 @@ def test__parsed_string__ignores_alternate_variant_parse_errors_with_valid_root(
     assert not parsed.violations
 
 
-def test__linter__fix_string_merges_non_conflicting_patches_across_variants():
-    """fix_string() should merge safe source edits from all parsed variants."""
+@pytest.mark.parametrize("variant_limit", [1, 5])
+def test__linter__fix_string_only_fixes_root_variant(variant_limit):
+    """Alternate branches report violations but only the root contributes fixes."""
     sql = """{% if False %}
 SELECT 1
 {% else %}
@@ -1121,7 +1122,7 @@ FROM t
 WHERE c < 0
 {% endif %}"""
     expected = """{% if False %}
-    SELECT 1
+SELECT 1
 {% else %}
     SELECT c
     FROM t
@@ -1134,7 +1135,7 @@ WHERE c < 0
                 "dialect": "ansi",
                 "templater": "jinja",
                 "rules": "LT02,LT12",
-                "render_variant_limit": 5,
+                "render_variant_limit": variant_limit,
             }
         }
     )
@@ -1144,6 +1145,36 @@ WHERE c < 0
 
     assert changed
     assert fixed_sql == expected
+    assert (("LT02", 2, 1) in linted.check_tuples()) == (variant_limit > 1)
+
+
+@pytest.mark.parametrize("variant_limit", [None, 1])
+def test__linter__alternate_variant_cannot_move_shared_comma(variant_limit):
+    """An alternate LT04 fix must not remove a comma used by the root render."""
+    sql = "SELECT\n{% if flag %}b{% else %}c{% endif %}\n, d\nFROM t\n"
+    config = FluffConfig.from_string(
+        "[sqlfluff]\ndialect = ansi\ntemplater = jinja\nrules = LT04\n"
+        "[sqlfluff:templater:jinja:context]\nflag = True\n"
+    )
+    if variant_limit is not None:
+        config.set_value(["render_variant_limit"], variant_limit)
+    linter = Linter(config=config)
+    linted = linter.lint_string(sql, fix=True)
+    fixed_sql, changed = linted.fix_string()
+
+    assert set(linted.check_tuples()) == {("LT04", 3, 1)}
+    assert not changed
+    assert fixed_sql == sql
+    for flag, column in [(True, "b"), (False, "c")]:
+        render_config = config.copy()
+        render_config.set_value(["templater", "jinja", "context", "flag"], flag)
+        parsed = Linter(config=render_config).parse_string(fixed_sql)
+        assert not parsed.violations
+        assert parsed.tree is not None
+        assert [
+            segment.raw
+            for segment in parsed.tree.recursive_crawl("select_clause_element")
+        ] == [column, "d"]
 
 
 def test__linter__deduplicates_duplicate_templater_violations_in_linted_output():

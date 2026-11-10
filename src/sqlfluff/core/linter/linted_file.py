@@ -10,7 +10,7 @@ import os
 import shutil
 import stat
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import NamedTuple, Optional
@@ -212,6 +212,10 @@ class LintedFile(NamedTuple):
         are templated or not, and therefore before Lexing and so is
         completely dialect agnostic. A Segment is determined by the
         Lexer from portions of strings after templating.
+
+        All root-render patches are applied as a single transaction. If source
+        slicing drops any patch or multiple edits target the same source slice,
+        leave the source unchanged rather than applying a partial fix.
         """
         assert self.templated_file, "Fixing a string requires successful templating."
         linter_logger.debug("Original Tree: %r", self.templated_file.templated_str)
@@ -235,8 +239,7 @@ class LintedFile(NamedTuple):
 
         original_source = self.templated_file.source_str
 
-        # Generate patches from the fixed tree, unless a merged set of source
-        # patches was already prepared across multiple variants.
+        # Generate patches from the fixed tree unless already prepared.
         filtered_source_patches = self.source_patches
         if filtered_source_patches is None:
             # NOTE: In normal usage, this clause is not hit, but has been kept
@@ -259,6 +262,29 @@ class LintedFile(NamedTuple):
         slice_buff = self._slice_source_file_using_patches(
             filtered_source_patches, source_only_slices, self.templated_file.source_str
         )
+
+        patch_keys = [
+            (patch.source_slice.start, patch.source_slice.stop)
+            for patch in filtered_source_patches
+        ]
+        slice_counts = Counter(
+            (source_slice.start, source_slice.stop) for source_slice in slice_buff
+        )
+        ordered_patch_keys = sorted(patch_keys)
+        if (
+            len(set(patch_keys)) != len(patch_keys)
+            or any(
+                previous_patch[1] > next_patch[0]
+                for previous_patch, next_patch in zip(
+                    ordered_patch_keys, ordered_patch_keys[1:]
+                )
+            )
+            or any(slice_counts[patch_key] != 1 for patch_key in patch_keys)
+        ):
+            linter_logger.warning(
+                "Discarding all source patches because they cannot all be applied."
+            )
+            return original_source, False
 
         linter_logger.debug("Final slice buffer: %s", slice_buff)
 

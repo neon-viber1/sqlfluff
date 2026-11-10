@@ -37,7 +37,7 @@ from sqlfluff.core.linter.linted_file import (
     LintedFile,
 )
 from sqlfluff.core.linter.linting_result import LintingResult
-from sqlfluff.core.linter.patch import generate_source_patches, merge_source_patches
+from sqlfluff.core.linter.patch import generate_source_patches
 from sqlfluff.core.parser import Lexer, Parser
 from sqlfluff.core.parser.segments.base import BaseSegment, SourceFix
 from sqlfluff.core.rules import BaseRule, RulePack, get_ruleset
@@ -742,11 +742,11 @@ class Linter:
         formatter: Optional[FormatterInterface] = None,
         encoding: str = "utf8",
     ) -> LintedFile:
-        """Lint a ParsedString and return a LintedFile."""
+        """Lint all variants, applying fixes only from the configured root render."""
         time_dict = parsed.time_dict
         tree: Optional[BaseSegment] = None
         templated_file: Optional[TemplatedFile] = None
-        merged_source_patches = None
+        source_patches = None
         t0 = time.monotonic()
 
         root_variant = parsed.root_variant()
@@ -773,7 +773,6 @@ class Linter:
         if root_variant:
             linter_logger.info("lint_parsed - linting root variant (%s)", parsed.fname)
             assert root_variant.tree  # We just checked this.
-            variant_source_patches = []
             (
                 fixed_tree,
                 initial_linting_errors,
@@ -793,8 +792,8 @@ class Linter:
             templated_file = root_variant.templated_file
             tree = fixed_tree
             if fix:
-                variant_source_patches.append(
-                    generate_source_patches(fixed_tree, root_variant.templated_file)
+                source_patches = generate_source_patches(
+                    fixed_tree, root_variant.templated_file
                 )
 
             # We're only going to return the *initial* errors, rather
@@ -808,7 +807,7 @@ class Linter:
                     continue
                 linter_logger.info("lint_parsed - linting alt variant (%s)", idx)
                 (
-                    alt_fixed_tree,
+                    _,
                     alt_linting_errors,
                     _,  # Ignore Mask
                     _,  # Timings
@@ -816,22 +815,12 @@ class Linter:
                     alternate_variant.tree,
                     config=parsed.config,
                     rule_pack=rule_pack,
-                    fix=fix,
+                    fix=False,
                     fname=parsed.fname,
                     templated_file=alternate_variant.templated_file,
                     formatter=formatter,
                 )
                 violations += alt_linting_errors
-                if fix:
-                    variant_source_patches.append(
-                        generate_source_patches(
-                            alt_fixed_tree,
-                            alternate_variant.templated_file,
-                        )
-                    )
-
-            if fix:
-                merged_source_patches = merge_source_patches(variant_source_patches)
 
         # If no root variant, we should still apply ignores to any parsing
         # or templating fails.
@@ -877,7 +866,7 @@ class Linter:
             ignore_mask=ignore_mask,
             templated_file=templated_file,
             encoding=encoding,
-            source_patches=merged_source_patches,
+            source_patches=source_patches,
         )
 
         # This is the main command line output from linting.

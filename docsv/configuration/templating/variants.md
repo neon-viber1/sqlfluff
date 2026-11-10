@@ -73,6 +73,20 @@ There are still some important limits:
 
 * SQLFluff does not attempt to enumerate every possible execution path.
 * Additional variants are capped by `render_variant_limit`.
+* Only the root render, produced using the configured templater context,
+  contributes fixes. Alternate variants still contribute lint violations, but
+  fixes found only in alternate branches are not applied. This prevents an
+  alternate fix from changing shared source that the root render also uses.
+* Root-render fixes are not checked against every other render. A fix made for
+  the configured context is not guaranteed to preserve the meaning or layout of
+  all other branches.
+* The root render's complete source patch set is applied as one transaction.
+  If any patch cannot be mapped safely or would be dropped during source
+  reconstruction, no fixes are written for that file. This ensures all edits
+  from a fix are applied together or not at all, but may also defer unrelated
+  fixes. This conservative file-level grouping avoids tracking individual fixes
+  through successive rule passes and tree rewrites; finer-grained per-fix
+  grouping is not implemented.
 * Support depends on the templater implementation. Jinja-derived templaters,
   including dbt, currently provide the most meaningful support.
 * More variants mean more work, so runtime and the number of surfaced issues can

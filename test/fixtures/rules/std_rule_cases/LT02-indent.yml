@@ -1716,12 +1716,31 @@ test_fail_fix_beside_templated:
     {% endif %}
   fix_str: |
     {% if False %}
-        SELECT 1
+    SELECT 1
     {% else %}
         SELECT c
         FROM t
         WHERE c < 0
     {% endif %}
+  violations_after_fix:
+    - description: Expected indent of 4 spaces.
+      name: layout.indent
+      warning: false
+      start_line_no: 2
+      start_line_pos: 1
+      start_file_pos: 15
+      end_line_no: 2
+      end_line_pos: 7
+      end_file_pos: 21
+      fixes:
+        - type: replace
+          edit: "\n    "
+          start_line_no: 1
+          start_line_pos: 15
+          start_file_pos: 14
+          end_line_no: 2
+          end_line_pos: 1
+          end_file_pos: 15
 
 test_pass_block_comment:
   # Check that subsequent block comment lines are ok to be indented.
@@ -2379,6 +2398,43 @@ test_fail_issue_4680:
       {% else %}
         col1 > 0
       {% endif %}
+  violations_after_fix:
+    - description: Expected indent of 8 spaces.
+      name: layout.indent
+      warning: false
+      start_line_no: 7
+      start_line_pos: 1
+      start_file_pos: 79
+      end_line_no: 7
+      end_line_pos: 5
+      end_file_pos: 83
+      fixes:
+        - type: replace
+          edit: "        "
+          start_line_no: 7
+          start_line_pos: 1
+          start_file_pos: 79
+          end_line_no: 7
+          end_line_pos: 5
+          end_file_pos: 83
+    - description: Expected indent of 4 spaces.
+      name: layout.indent
+      warning: false
+      start_line_no: 8
+      start_line_pos: 1
+      start_file_pos: 92
+      end_line_no: 8
+      end_line_pos: 3
+      end_file_pos: 94
+      fixes:
+        - type: replace
+          edit: "    "
+          start_line_no: 8
+          start_line_pos: 1
+          start_file_pos: 92
+          end_line_no: 8
+          end_line_pos: 3
+          end_file_pos: 94
   fix_str: |
     SELECT col1
     FROM table
@@ -2386,8 +2442,8 @@ test_fail_issue_4680:
         {% if true %}
             col1 > 1
         {% else %}
-            col1 > 0
-        {% endif %}
+        col1 > 0
+      {% endif %}
 
 test_implicit_indent_when:
   fail_str: |
