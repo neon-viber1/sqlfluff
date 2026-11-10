@@ -1978,6 +1978,17 @@ def lint_indent_points(
 
     # Skip elements we're configured to not touch (i.e. scripts)
     for line in lines[:]:
+        first_block = next(line.iter_blocks(elements), None)
+        if (
+            first_block
+            and "dot" in first_block.class_types
+            and any(
+                "chained_function_call" in types
+                for types in first_block.depth_info.stack_class_types
+            )
+        ):
+            lines.remove(line)
+            continue
         for block in line.iter_blocks(elements):
             if any(
                 skip_indentation_in.intersection(types)
