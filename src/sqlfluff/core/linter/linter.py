@@ -742,7 +742,7 @@ class Linter:
         formatter: Optional[FormatterInterface] = None,
         encoding: str = "utf8",
     ) -> LintedFile:
-        """Lint a ParsedString and return a LintedFile."""
+        """Lint all variants, applying fixes only from the configured root render."""
         time_dict = parsed.time_dict
         tree: Optional[BaseSegment] = None
         templated_file: Optional[TemplatedFile] = None
@@ -808,7 +808,7 @@ class Linter:
                     continue
                 linter_logger.info("lint_parsed - linting alt variant (%s)", idx)
                 (
-                    alt_fixed_tree,
+                    _,
                     alt_linting_errors,
                     _,  # Ignore Mask
                     _,  # Timings
@@ -816,19 +816,12 @@ class Linter:
                     alternate_variant.tree,
                     config=parsed.config,
                     rule_pack=rule_pack,
-                    fix=fix,
+                    fix=False,
                     fname=parsed.fname,
                     templated_file=alternate_variant.templated_file,
                     formatter=formatter,
                 )
                 violations += alt_linting_errors
-                if fix:
-                    variant_source_patches.append(
-                        generate_source_patches(
-                            alt_fixed_tree,
-                            alternate_variant.templated_file,
-                        )
-                    )
 
             if fix:
                 merged_source_patches = merge_source_patches(variant_source_patches)

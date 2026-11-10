@@ -298,7 +298,7 @@ def test__fix__jinja_non_empty_context_adjacent_to_quotes(caplog):
         (
             "LT05",
             "{% if false %}select " + "a" * 65 + "{% endif %}select 1\n",
-            "{% if false %}\n    select\n" + "a" * 65 + "{% endif %}select 1\n",
+            "{% if false %}select " + "a" * 65 + "{% endif %}select 1\n",
         ),
     ],
 )
@@ -311,7 +311,7 @@ def test__fix__token_spanning_jinja_tag(rules, sql, expected):
     linted_file = linter.lint_string(sql, fix=True)
     fixed_sql, changed = linted_file.fix_string()
 
-    assert changed
+    assert changed == (sql != expected)
     assert fixed_sql == expected
 
 
@@ -474,8 +474,7 @@ def test__fix__merge_source_patches_skips_conflicting_insertions_at_same_point()
     [
         (
             "select\n{% if true %}{% if false %}    a,\n{% endif %}{% endif %}    b\n",
-            "select\n    {% if true %}\n        {% if false %}    a,\n        "
-            "{% endif %}{% endif %}    b\n",
+            "select\n    {% if true %}{% if false %}    a,\n{% endif %}{% endif %}    b\n",
         ),
         (
             "SELECT\n{% if true %}{% if true %}    a\n{% endif %}{% endif %}\n",
@@ -483,8 +482,7 @@ def test__fix__merge_source_patches_skips_conflicting_insertions_at_same_point()
         ),
         (
             "select\n  a, {% if true %}{% if false %}b,{% endif %}{% endif %}\n  c\n",
-            "select\n    a,{% if true %}{% if false %}\n        "
-            "b,{% endif %}{% endif %}\n    c\n",
+            "select\n    a, {% if true %}{% if false %}b,{% endif %}{% endif %}\n    c\n",
         ),
     ],
 )
@@ -504,7 +502,10 @@ def test__fix__jinja_lt02_nested_block_tags_reach_a_fixed_point(sql, expected):
     assert not changed_twice
     assert twice == once
     assert once == expected
-    assert not linter.lint_string(once, fname="test.sql").get_violations()
+    config.set_value(["render_variant_limit"], 1)
+    assert (
+        not Linter(config=config).lint_string(once, fname="test.sql").get_violations()
+    )
 
 
 class Rule_T901(BaseRule):
