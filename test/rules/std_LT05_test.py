@@ -84,6 +84,54 @@ def test_lt05_multiline_template_comment(ignore):
 
 @pytest.mark.parametrize("ignore", [True, False])
 @pytest.mark.parametrize(
+    "prefix,suffix",
+    [
+        ("{% macro x() %}\n", "\n{% endmacro %}\nSELECT 1\n"),
+        ("{% macro x() %}", "\n{% endmacro %}\nSELECT 1\n"),
+        ("{% macro x() %}", "{% endmacro %}\nSELECT 1\n"),
+        ("{% for x in [] %}\n", "\n{% endfor %}\nSELECT 1\n"),
+        ("{% if true %}\nSELECT 1\n{% else %}\n", "\n{% endif %}\n"),
+        ("{% if false %}\nSELECT 1\n{% else %}\n", "\n{% endif %}\n"),
+    ],
+)
+@pytest.mark.parametrize(
+    "dialect,body,is_comment",
+    [
+        ("ansi", "    -- " + "a" * 85, True),
+        ("ansi", "SELECT 1 -- " + "a" * 85, True),
+        ("ansi", "/*\n" + "a" * 85 + "\n*/", True),
+        ("ansi", "SELECT '-- " + "a" * 85 + "'", False),
+        ("ansi", "SELECT '/* " + "a" * 85 + " */'", False),
+        ("mysql", "    # " + "a" * 85, True),
+        ("mysql", "SELECT '# " + "a" * 85 + "'", False),
+    ],
+)
+def test_lt05_unrendered_sql_comment_lines(
+    prefix, suffix, dialect, body, is_comment, ignore
+):
+    """Apply SQL comment exemptions to hidden source using the active dialect."""
+    sql = prefix + body + suffix
+    config = FluffConfig(
+        configs={
+            "core": {"dialect": dialect, "rules": "LT05"},
+            "rules": {"layout.long_lines": {"ignore_comment_lines": ignore}},
+        }
+    )
+    result = Linter(config=config).lint_string(sql)
+    expected = (
+        []
+        if ignore and is_comment
+        else [
+            (line_no, f"Line is too long ({len(line)} > 80).")
+            for line_no, line in enumerate(sql.splitlines(), 1)
+            if len(line) > 80
+        ]
+    )
+    assert [(v.line_no, v.desc()) for v in result.get_violations()] == expected
+
+
+@pytest.mark.parametrize("ignore", [True, False])
+@pytest.mark.parametrize(
     "sql,option",
     [
         ("SELECT 1 --" + "a" * 85, "ignore_comment_lines"),
@@ -105,6 +153,30 @@ def test_lt05_comment_after_multiline_placeholder(sql, option, ignore):
         "{% macro x() %}\nx\n{% endmacro %} " + sql + "\n"
     )
     assert len(result.get_violations()) == (not ignore)
+
+
+@pytest.mark.parametrize("ignore", [True, False])
+def test_lt05_hidden_comment_preserves_neighboring_sql_violation(ignore):
+    """Exempt only comment lines, not the whole hidden template block."""
+    lines = [
+        "{% macro x() %}",
+        "-- " + "a" * 85,
+        "SELECT " + "a" * 85,
+        "{% endmacro %}",
+        "SELECT 1",
+    ]
+    config = FluffConfig(
+        configs={
+            "core": {"dialect": "ansi", "rules": "LT05"},
+            "rules": {"layout.long_lines": {"ignore_comment_lines": ignore}},
+        }
+    )
+    result = Linter(config=config).lint_string("\n".join(lines) + "\n")
+    assert [(v.line_no, v.desc()) for v in result.get_violations()] == [
+        (line_no, f"Line is too long ({len(line)} > 80).")
+        for line_no, line in enumerate(lines, 1)
+        if len(line) > 80 and not (ignore and line_no == 2)
+    ]
 
 
 @pytest.mark.parametrize("flag", [True, False])

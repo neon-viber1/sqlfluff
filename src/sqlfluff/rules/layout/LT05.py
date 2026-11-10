@@ -3,7 +3,7 @@
 from fnmatch import fnmatch
 from typing import cast
 
-from sqlfluff.core.parser import RawSegment
+from sqlfluff.core.parser import Lexer, RawSegment
 from sqlfluff.core.parser.markers import PositionMarker
 from sqlfluff.core.parser.segments import TemplateSegment
 from sqlfluff.core.rules import LintResult, RuleContext
@@ -159,20 +159,34 @@ class Rule_LT05(BaseRule):
                     # loop too.
                     break
 
-        return results + self._unrendered_line_results(context, reported_lines)
+        unrendered_results, ignored_lines = self._unrendered_line_results(
+            context, reported_lines
+        )
+        return [
+            result
+            for result in results + unrendered_results
+            if not (
+                result.anchor
+                and result.anchor.pos_marker
+                and result.anchor.pos_marker.source_position()[0] in ignored_lines
+            )
+        ]
 
     def _unrendered_line_results(
         self, context: RuleContext, reported_lines: set[int]
-    ) -> list[LintResult]:
-        """Check source lines hidden inside multiline placeholders.
+    ) -> tuple[list[LintResult], set[int]]:
+        """Check hidden source lines and return source comment exemptions.
 
         Reflow processes rendered lines and only measures up to the first
         source newline in a placeholder. Check the physical source lines
         separately, without attempting to edit template contents.
+
+        Lex hidden SQL with the active dialect so comment exemptions also
+        apply when a template variant does not render the comment.
         """
         limit = context.config.get("max_line_length")
         if not context.templated_file or limit <= 0:
-            return []
+            return [], set()
 
         source = context.templated_file.source_str
         ignored_lines: set[int] = set()
@@ -198,13 +212,32 @@ class Rule_LT05(BaseRule):
                 if line_pos < limit:
                     ignored_lines.add(line_no)
         results = []
+        source_lexer = None
         for seg in context.segment.raw_segments:
             if not seg.is_type("placeholder") or not seg.pos_marker:
                 continue
-            if "\n" not in seg.pos_marker.source_str():
-                continue
             pos = seg.pos_marker.source_slice.start
             stop = seg.pos_marker.source_slice.stop
+            if self.ignore_comment_lines and cast(TemplateSegment, seg).block_type in (
+                "literal",
+                "skipped_source",
+            ):
+                if source_lexer is None:
+                    source_lexer = Lexer(config=context.config)
+                source_segments, _ = source_lexer.lex(seg.pos_marker.source_str())
+                for comment in source_segments:
+                    if not comment.is_type("comment"):
+                        continue
+                    assert comment.pos_marker
+                    start_line, _ = context.templated_file.get_line_pos_of_char_pos(
+                        pos + comment.pos_marker.source_slice.start, source=True
+                    )
+                    end_line, _ = context.templated_file.get_line_pos_of_char_pos(
+                        pos + comment.pos_marker.source_slice.stop - 1, source=True
+                    )
+                    ignored_lines.update(range(start_line, end_line + 1))
+            if "\n" not in seg.pos_marker.source_str():
+                continue
             while pos <= stop and pos < len(source):
                 start = source.rfind("\n", 0, pos) + 1
                 end = source.find("\n", pos)
@@ -242,7 +275,7 @@ class Rule_LT05(BaseRule):
                     reported_lines.add(line_no)
                 pos = end + 1
         if not results:
-            return []
+            return [], ignored_lines
         disable_noqa_except = context.config.get("disable_noqa_except")
         references = (self.code, self.name, *self.aliases, *self.groups)
         if disable_noqa_except:
@@ -251,9 +284,9 @@ class Rule_LT05(BaseRule):
                 for reference in references
                 for pattern in disable_noqa_except.split(",")
             ):
-                return results
+                return results, ignored_lines
         elif context.config.get("disable_noqa"):
-            return results
+            return results, ignored_lines
         ignore_mask, _ = IgnoreMask.from_source_with_dialect(
             source,
             context.dialect,
@@ -264,4 +297,4 @@ class Rule_LT05(BaseRule):
             for result in results
             if (error := result.to_linting_error(self)) is not None
             and ignore_mask.ignore_masked_violations([error])
-        ]
+        ], ignored_lines
