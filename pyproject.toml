@@ -132,6 +132,7 @@ sqlfluff_rules_jinja = "sqlfluff.rules.jinja"
 sqlfluff_rules_tsql = "sqlfluff.rules.tsql"
 sqlfluff_rules_postgres = "sqlfluff.rules.postgres"
 sqlfluff_rules_oracle = "sqlfluff.rules.oracle"
+sqlfluff_rules_bigquery = "sqlfluff.rules.bigquery"
 
 
 [tool.sqlfluff_docs]

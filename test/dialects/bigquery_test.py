@@ -201,3 +201,21 @@ def test_with_expression_requires_variable_and_result(sql):
     """WITH expressions need a variable assignment and a result expression."""
     parsed = Linter(dialect="bigquery").parse_string(sql)
     assert any(violation.rule_code() == "PRS" for violation in parsed.violations)
+
+
+def test_disallowed_with_expressions_are_reported_individually():
+    """Each BigQuery WITH expression receives its own BQ01 violation."""
+    config = FluffConfig(
+        configs={
+            "rules": {"bigquery.with_expressions": {"allow": False}},
+        },
+        overrides={"dialect": "bigquery", "rules": "BQ01"},
+    )
+    linter = Linter(config=config)
+    result = linter.lint_string("SELECT WITH (a AS 1, a), WITH (b AS 2, b);")
+
+    violations = [
+        violation for violation in result.violations if violation.rule_code() == "BQ01"
+    ]
+    assert len(violations) == 2
+    assert all(violation.segment.is_type("with_expression") for violation in violations)
