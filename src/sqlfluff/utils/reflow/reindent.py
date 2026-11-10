@@ -2164,7 +2164,7 @@ def _source_char_len(elements: ReflowSequenceType) -> int:
                 continue
             # Otherwise if we're literal, use the raw length
             # because it might be an edit.
-            elif seg.pos_marker.is_literal():
+            elif seg.pos_marker.is_literal() and not seg.is_type("placeholder"):
                 char_len += len(seg.raw)
                 last_source_slice = source_slice
             # Otherwise assume it's templated code.
@@ -2659,8 +2659,22 @@ def _is_templated_safe_break(elements: ReflowSequenceType, e_idx: int) -> bool:
     within rendered template content cannot be mapped back to the source file
     correctly, which can lead to content duplication or corruption.
 
+    Breaks adjacent to unrendered literal content are also unsafe: they
+    would edit the contents of a template block rather than rendered SQL.
+
     See: https://github.com/sqlfluff/sqlfluff/issues/7639
     """
+    for adjacent_idx in (e_idx - 1, e_idx, e_idx + 1):
+        if 0 <= adjacent_idx < len(elements):
+            for segment in elements[adjacent_idx].segments:
+                if (
+                    segment.is_type("placeholder")
+                    and cast(TemplateSegment, segment).block_type
+                    in ("literal", "skipped_source")
+                    and cast(TemplateSegment, segment).source_str.strip()
+                ):
+                    return False
+
     # Check the segment before the break point.
     before_literal = True
     if e_idx > 0 and elements[e_idx - 1].segments:

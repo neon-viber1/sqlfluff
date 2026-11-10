@@ -298,7 +298,7 @@ def test__fix__jinja_non_empty_context_adjacent_to_quotes(caplog):
         (
             "LT05",
             "{% if false %}select " + "a" * 65 + "{% endif %}select 1\n",
-            "{% if false %}\n    select\n" + "a" * 65 + "{% endif %}select 1\n",
+            "{% if false %}\n    select\n" + "a" * 65 + "{% endif %}\nselect 1\n",
         ),
     ],
 )

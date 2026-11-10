@@ -1,5 +1,21 @@
 rule: LT05
 
+test_fail_unrendered_macro_source:
+  fail_str: |
+    {% macro x() %}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{% endmacro %}
+    SELECT 1
+
+test_fail_multiline_empty_loop_source:
+  fail_str: |
+    {% for x in [] %}
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    {% endfor %}
+    SELECT 1
+
+test_fail_trimmed_source_whitespace:
+  fail_str: '    {%- if true %}SELECT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{%- endif %}'
+  fix_str: "    {%- if true %}SELECT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n{%- endif %}"
+
 test_pass_line_too_long_config_override:
   # Long lines (with config override)
   pass_str: "SELECT COUNT(*) FROM tbl\n"

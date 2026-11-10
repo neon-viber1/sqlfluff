@@ -108,10 +108,25 @@ class LintedFile(NamedTuple):
         By filtering them early we get a more a more helpful CLI
         output *and* and more efficient fixing routine (by handling
         fewer fixes).
+
+        A source-only report from one template variant can also match a
+        fixable report from another. Keep the fixable report in that case,
+        while still retaining reports with distinct fixes.
         """
+        fixable_signatures = {
+            (violation.check_tuple(), violation.desc())
+            for violation in violations
+            if isinstance(violation, SQLLintError) and violation.fixes
+        }
         new_violations = []
         dedupe_buffer = set()
         for v in violations:
+            if (
+                isinstance(v, SQLLintError)
+                and not v.fixes
+                and (v.check_tuple(), v.desc()) in fixable_signatures
+            ):
+                continue
             signature = v.source_signature()
             if signature not in dedupe_buffer:
                 new_violations.append(v)
