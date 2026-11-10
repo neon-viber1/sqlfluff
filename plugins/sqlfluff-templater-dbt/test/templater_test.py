@@ -991,3 +991,98 @@ def test__templater_dbt_threads_explicit(dbt_templater):
         },
     )
     assert dbt_templater._get_threads() == 4
+
+
+def _relations_cache_config(value=None):
+    dbt_cfg = {"project_dir": None}
+    if value is not None:
+        dbt_cfg["populate_relations_cache"] = value
+    return FluffConfig(
+        configs={"core": {"dialect": "ansi"}, "templater": {"dbt": dbt_cfg}}
+    )
+
+
+@pytest.mark.parametrize(
+    "env_value,expected",
+    [
+        ("1", True),
+        ("true", True),
+        (" TRUE ", True),
+        ("t", True),
+        ("yes", True),
+        ("y", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("False", False),
+        ("f", False),
+        ("no", False),
+        ("n", False),
+        ("off", False),
+    ],
+)
+def test__templater_dbt_populate_cache_env_parsing(
+    dbt_templater, monkeypatch, env_value, expected
+):
+    """DBT_POPULATE_CACHE accepts dbt-style boolean spellings."""
+    dbt_templater.sqlfluff_config = _relations_cache_config()
+    monkeypatch.setenv("DBT_POPULATE_CACHE", env_value)
+    assert dbt_templater._should_populate_relations_cache() is expected
+
+
+def test__templater_dbt_populate_cache_default_and_config(dbt_templater, monkeypatch):
+    """Default is True, config can disable, and env takes precedence."""
+    monkeypatch.delenv("DBT_POPULATE_CACHE", raising=False)
+    dbt_templater.sqlfluff_config = _relations_cache_config()
+    assert dbt_templater._should_populate_relations_cache() is True
+    dbt_templater.sqlfluff_config = _relations_cache_config(False)
+    assert dbt_templater._should_populate_relations_cache() is False
+    monkeypatch.setenv("DBT_POPULATE_CACHE", "true")
+    assert dbt_templater._should_populate_relations_cache() is True
+    dbt_templater.sqlfluff_config = _relations_cache_config(True)
+    monkeypatch.setenv("DBT_POPULATE_CACHE", "false")
+    assert dbt_templater._should_populate_relations_cache() is False
+
+
+def test__templater_dbt_populate_cache_invalid_env(dbt_templater, monkeypatch):
+    """An unrecognised DBT_POPULATE_CACHE value raises a user error."""
+    dbt_templater.sqlfluff_config = _relations_cache_config()
+    monkeypatch.setenv("DBT_POPULATE_CACHE", "maybe")
+    with pytest.raises(SQLFluffUserError, match="DBT_POPULATE_CACHE"):
+        dbt_templater._should_populate_relations_cache()
+
+
+@pytest.mark.parametrize(
+    "config_value,env_value,should_call",
+    [
+        (None, None, True),
+        (False, None, False),
+        (None, "false", False),
+        (False, "true", True),
+    ],
+)
+def test__templater_dbt_connection_relations_cache(
+    dbt_templater, monkeypatch, config_value, env_value, should_call
+):
+    """connection() only warms the relation cache when enabled."""
+    pytest.importorskip("dbt")
+    if env_value is None:
+        monkeypatch.delenv("DBT_POPULATE_CACHE", raising=False)
+    else:
+        monkeypatch.setenv("DBT_POPULATE_CACHE", env_value)
+    dbt_templater.sqlfluff_config = _relations_cache_config(config_value)
+    dbt_templater.project_dir = "dummy_project_dir_for_cache_test"
+    dbt_templater.dbt_config = mock.Mock()
+    dbt_templater.dbt_manifest = mock.Mock()
+    adapter = mock.Mock()
+    DbtTemplater.adapters.pop(dbt_templater.project_dir, None)
+    try:
+        with mock.patch("dbt.adapters.factory.get_adapter", return_value=adapter):
+            with dbt_templater.connection():
+                pass
+    finally:
+        DbtTemplater.adapters.pop(dbt_templater.project_dir, None)
+    assert adapter.set_relations_cache.called is should_call
+    # Macro setup must be unaffected (dbt >= 1.8).
+    if dbt_templater.dbt_version_tuple >= (1, 8):
+        assert adapter.set_macro_resolver.called
