@@ -294,6 +294,8 @@ When a select clause has more than one target,
 [LT09](../reference/rules/layout#lt09) puts each target on its own line,
 at any line length. It is one of the rules which `sqlfluff format`
 applies. To also fill the select targets, add `LT09` to `exclude_rules`.
+`LT09` also puts each item of a multi-item `GROUP BY` or statement-level
+`ORDER BY` list on its own line.
 :::
 
 

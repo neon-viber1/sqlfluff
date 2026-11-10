@@ -37,6 +37,11 @@ class Rule_LT09(BaseRule):
        ones, to be placed on a new line set ``single_target_policy = new_line``.
        This gives consistent formatting regardless of the number of select targets.
 
+    .. note::
+       The same layout is applied to multi-item ``GROUP BY`` and statement-level
+       ``ORDER BY`` lists: each item is placed on its own line. ``ORDER BY``
+       inside window specifications or function calls is not affected.
+
     **Anti-pattern**
 
     Multiple select targets on the same line.
@@ -52,6 +57,14 @@ class Rule_LT09(BaseRule):
         SELECT
             a
         FROM foo;
+
+        -- Multiple GROUP BY items on the same line.
+
+        SELECT
+            a,
+            b
+        FROM foo
+        GROUP BY a, b;
 
 
     **Best practice**
@@ -70,6 +83,16 @@ class Rule_LT09(BaseRule):
 
         SELECT a
         FROM foo;
+
+        -- Multiple GROUP BY items each on their own line.
+
+        SELECT
+            a,
+            b
+        FROM foo
+        GROUP BY
+            a,
+            b;
 
         -- With ``single_target_policy = new_line``, single select
         -- targets must also be on a new line for consistency.
@@ -95,12 +118,16 @@ class Rule_LT09(BaseRule):
     aliases = ("L036",)
     groups = ("all", "layout")
     config_keywords = ["wildcard_policy", "single_target_policy"]
-    crawl_behaviour = SegmentSeekerCrawler({"select_clause"})
+    crawl_behaviour = SegmentSeekerCrawler(
+        {"select_clause", "groupby_clause", "orderby_clause"}
+    )
     is_fix_compatible = True
 
     def _eval(self, context: RuleContext) -> Optional[LintResult]:
         self.wildcard_policy: str
         self.single_target_policy: str
+        if context.segment.is_type("groupby_clause", "orderby_clause"):
+            return self._eval_list_clause(context)
         assert context.segment.is_type("select_clause")
         select_targets_info = self._get_indexes(context)
         select_clause = FunctionalContext(context).segment
@@ -119,6 +146,101 @@ class Rule_LT09(BaseRule):
             return self._eval_multiple_select_target_elements(
                 select_targets_info, context.segment
             )
+        return None
+
+    def _eval_list_clause(self, context: RuleContext) -> Optional[LintResult]:
+        """Ensure each item of a multi-item GROUP BY / ORDER BY is on its own line.
+
+        Only the direct children of the clause are considered, so commas inside
+        brackets (function arguments, ``ROLLUP(...)``, etc.) are never touched.
+        """
+        segment = context.segment
+        # Only the statement-level ORDER BY is in scope. An ORDER BY inside a
+        # window specification or function call is left alone.
+        if segment.is_type("orderby_clause") and context.parent_stack:
+            if context.parent_stack[-1].is_type(
+                "window_specification", "function", "bracketed", "aggregate_order_by"
+            ):
+                return None
+        children = segment.segments
+        if not any(child.is_type("comma") for child in children):
+            return None
+
+        def is_skippable(seg: BaseSegment) -> bool:
+            return seg.is_type("whitespace", "newline", "comment") or seg.is_meta
+
+        # Work out the first segment of each item, and the code before it.
+        starters: list[int] = []
+        by_seen = False
+        expect_item = False
+        for idx, child in enumerate(children):
+            if is_skippable(child):
+                continue
+            if not by_seen:
+                if child.is_type("keyword") and child.raw_upper == "BY":
+                    by_seen = True
+                    expect_item = True
+                continue
+            if child.is_type("comma"):
+                expect_item = True
+                continue
+            if expect_item:
+                # A leading keyword (e.g. ``GROUP BY ALL``) is not a list item.
+                if not (child.is_type("keyword") and not starters):
+                    starters.append(idx)
+                expect_item = False
+        if len(starters) < 2:
+            return None
+
+        fixes: list[LintFix] = []
+        for idx in starters:
+            starter = children[idx]
+            # Find the preceding code segment in the clause.
+            prev_idx = idx - 1
+            while prev_idx >= 0 and is_skippable(children[prev_idx]):
+                prev_idx -= 1
+            if prev_idx < 0:  # pragma: no cover
+                continue
+            previous = children[prev_idx]
+            if previous.is_type("comma"):
+                # Look back further for the end of the previous item.
+                prev_idx -= 1
+                while prev_idx >= 0 and is_skippable(children[prev_idx]):
+                    prev_idx -= 1
+                if prev_idx < 0:  # pragma: no cover
+                    continue
+                previous = children[prev_idx]
+            if not (starter.pos_marker and previous.pos_marker):  # pragma: no cover
+                continue
+            last_raw = previous.raw_segments[-1]
+            if last_raw.pos_marker is None:  # pragma: no cover
+                continue
+            if (
+                starter.pos_marker.working_line_no
+                != last_raw.pos_marker.working_line_no
+            ):
+                continue
+            # Don't attempt to edit templated sections.
+            if not starter.pos_marker.is_literal():
+                continue
+            # Delete the whitespace immediately before the starter.
+            ws_idx = idx - 1
+            to_delete: list[BaseSegment] = []
+            while ws_idx >= 0 and (
+                children[ws_idx].is_type("whitespace") or children[ws_idx].is_meta
+            ):
+                if children[ws_idx].is_type("whitespace"):
+                    to_delete.append(children[ws_idx])
+                ws_idx -= 1
+            if any(
+                not ws.pos_marker or not ws.pos_marker.is_literal() for ws in to_delete
+            ):
+                continue  # pragma: no cover
+            fixes.extend(LintFix.delete(ws) for ws in to_delete)
+            fixes.append(LintFix.create_before(starter, [NewlineSegment()]))
+
+        if fixes:
+            return LintResult(anchor=segment, fixes=fixes)
         return None
 
     @staticmethod
