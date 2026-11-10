@@ -1,0 +1,307 @@
+rule: LT16
+
+test_consistent_one_liner_pass:
+  configs:
+    core:
+      dialect: bigquery
+  pass_str: |
+    SELECT (foo).TRIM().LOWER(), (bar).UPPER();
+
+test_one_liner:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: one_liner
+  fail_str: |
+    SELECT
+        (foo)
+            .REPLACE('a', '0')
+            .REPLACE('b', '1')
+            .REPLACE('c', '2') AS bar;
+  fix_str: |
+    SELECT
+        (foo).REPLACE('a', '0').REPLACE('b', '1').REPLACE('c', '2') AS bar;
+
+test_aligned:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: aligned
+  fail_str: |
+    SELECT
+        (foo).REPLACE('a', '0').REPLACE('b', '1').REPLACE('c', '2') AS bar;
+  fix_str: |
+    SELECT
+        (foo)
+        .REPLACE('a', '0')
+        .REPLACE('b', '1')
+        .REPLACE('c', '2') AS bar;
+
+test_indented_long_chain:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: indented
+  fail_str: |
+    SELECT
+        (adresse).TRIM().LOWER().REPLACE('ch', 'chemin').REPLACE('av', 'avenue').REPLACE('bd', 'boulevard').REPLACE('bvd', 'boulevard') AS adresse_clean;
+  fix_str: |
+    SELECT
+        (adresse)
+            .TRIM()
+            .LOWER()
+            .REPLACE('ch', 'chemin')
+            .REPLACE('av', 'avenue')
+            .REPLACE('bd', 'boulevard')
+            .REPLACE('bvd', 'boulevard') AS adresse_clean;
+
+test_consistent_first_chain_one_liner:
+  configs:
+    core:
+      dialect: bigquery
+  fail_str: |
+    SELECT
+        (foo).TRIM()
+        .LOWER() AS foo,
+        (bar)
+            .UPPER() AS bar;
+  fix_str: |
+    SELECT
+        (foo).TRIM().LOWER() AS foo,
+        (bar).UPPER() AS bar;
+
+test_consistent_first_chain_aligned:
+  configs:
+    core:
+      dialect: bigquery
+  fail_str: |
+    SELECT
+        (foo)
+        .TRIM().LOWER() AS foo,
+        (bar).UPPER() AS bar;
+  fix_str: |
+    SELECT
+        (foo)
+        .TRIM()
+        .LOWER() AS foo,
+        (bar)
+        .UPPER() AS bar;
+
+test_consistent_first_chain_indented:
+  configs:
+    core:
+      dialect: bigquery
+  fail_str: |
+    SELECT
+        (foo)
+            .TRIM().LOWER() AS foo,
+        (bar).UPPER() AS bar;
+  fix_str: |
+    SELECT
+        (foo)
+            .TRIM()
+            .LOWER() AS foo,
+        (bar)
+            .UPPER() AS bar;
+
+test_single_call_indentation:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: indented
+  fail_str: |
+    SELECT
+        (foo)
+      .TRIM() AS foo;
+  fix_str: |
+    SELECT
+        (foo)
+            .TRIM() AS foo;
+
+test_aligned_single_call_pass:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: aligned
+  pass_str: |
+    SELECT
+        (foo)
+        .TRIM();
+
+test_indented_pass:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: indented
+  pass_str: |
+    SELECT
+        (foo)
+            .TRIM()
+            .LOWER();
+
+test_tabs:
+  configs:
+    core:
+      dialect: bigquery
+    indentation:
+      indent_unit: tab
+      tab_space_size: 2
+    rules:
+      layout.chained_functions:
+        writing_style: indented
+  fail_str: "SELECT\n\t(foo).TRIM();\n"
+  fix_str: "SELECT\n\t(foo)\n\t\t.TRIM();\n"
+
+test_two_space_indent:
+  configs:
+    core:
+      dialect: bigquery
+    indentation:
+      tab_space_size: 2
+    rules:
+      layout.chained_functions:
+        writing_style: indented
+  fail_str: |
+    SELECT
+      (foo).TRIM();
+  fix_str: |
+    SELECT
+      (foo)
+        .TRIM();
+
+test_unrelated_expressions:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: indented
+  pass_str: |
+    SELECT
+      LOWER(TRIM(foo)),
+      REPLACE(REPLACE(foo, 'a', '0'), 'b', '1'),
+      schema.udf(foo),
+      foo.bar,
+      (foo).bar,
+      foo[OFFSET(0)].bar;
+
+test_other_dialect:
+  pass_str: SELECT schema.func(foo), foo.bar FROM tbl;
+
+test_separate_chains_in_expression:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: aligned
+  fail_str: |
+    SELECT
+        (foo).TRIM() || (bar).LOWER();
+  fix_str: |
+    SELECT
+        (foo)
+        .TRIM() || (bar)
+        .LOWER();
+
+test_comments_preserved:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: indented
+  fail_str: |
+    SELECT
+        (foo) -- input
+        .TRIM() /* next call */ .LOWER() AS foo;
+  fix_str: |
+    SELECT
+        (foo) -- input
+            .TRIM() /* next call */
+            .LOWER() AS foo;
+
+test_one_liner_comment_not_fixable:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: one_liner
+  fail_str: |
+    SELECT (foo) -- keep this comment
+        .TRIM();
+
+test_one_liner_block_comment_not_fixable:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: one_liner
+  fail_str: SELECT (foo)/*keep*/.TRIM();
+
+test_arguments_unchanged:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: indented
+  fail_str: |
+    SELECT
+        (foo).REPLACE(
+            'a', -- argument
+            LOWER(bar)
+        ).TRIM();
+  fix_str: |
+    SELECT
+        (foo)
+            .REPLACE(
+            'a', -- argument
+            LOWER(bar)
+        )
+            .TRIM();
+
+test_nested_chain:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: aligned
+  fail_str: |
+    SELECT
+        ((foo).TRIM()).LOWER();
+  fix_str: |
+    SELECT
+        ((foo)
+        .TRIM())
+        .LOWER();
+
+test_array_access:
+  configs:
+    core:
+      dialect: bigquery
+    rules:
+      layout.chained_functions:
+        writing_style: indented
+  fail_str: |
+    SELECT
+        (foo).ARRAY_CONCAT(bar)[OFFSET(0)];
+  fix_str: |
+    SELECT
+        (foo)
+            .ARRAY_CONCAT(bar)[OFFSET(0)];
