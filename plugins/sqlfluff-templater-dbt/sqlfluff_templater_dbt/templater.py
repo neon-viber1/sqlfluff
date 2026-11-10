@@ -459,6 +459,39 @@ class DbtTemplater(JinjaTemplater):
             default=True,
         )
 
+    @staticmethod
+    def _parse_bool(value: object, source: str) -> bool:
+        """Parse a boolean-like value, raising a user error if unrecognised."""
+        if isinstance(value, bool):
+            return value
+        lowered = str(value).strip().lower()
+        if lowered in ("1", "true", "t", "yes", "y", "on"):
+            return True
+        if lowered in ("0", "false", "f", "no", "n", "off"):
+            return False
+        raise SQLFluffUserError(
+            f"Invalid boolean value {value!r} for {source}. "
+            "Expected one of: true/false, 1/0, yes/no, on/off."
+        )
+
+    def _should_populate_relations_cache(self) -> bool:
+        """Decide whether to warm dbt's relation cache.
+
+        The ``DBT_POPULATE_CACHE`` environment variable takes precedence,
+        then the ``populate_relations_cache`` config option (default True).
+        """
+        env_val = os.environ.get("DBT_POPULATE_CACHE")
+        if env_val is not None and env_val.strip() != "":
+            return self._parse_bool(env_val, "DBT_POPULATE_CACHE")
+        return self._parse_bool(
+            self.sqlfluff_config.get(
+                val="populate_relations_cache",
+                section=(self.templater_selector, self.name),
+                default=True,
+            ),
+            "populate_relations_cache",
+        )
+
     def sequence_files(
         self, fnames: list[str], config=None, formatter=None
     ) -> Iterator[str]:
@@ -889,6 +922,12 @@ class DbtTemplater(JinjaTemplater):
 
                 adapter.set_macro_resolver(self.dbt_manifest)
                 adapter.set_macro_context_generator(generate_runtime_macro_context)
+            if not self._should_populate_relations_cache():
+                templater_logger.debug(
+                    "Skipping dbt relation cache population "
+                    "(DBT_POPULATE_CACHE / populate_relations_cache)."
+                )
+            elif self.dbt_version_tuple >= (1, 8):
                 adapter.set_relations_cache(self.dbt_manifest.nodes.values())
             else:
                 adapter.set_relations_cache(self.dbt_manifest)

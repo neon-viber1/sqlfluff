@@ -88,7 +88,18 @@ profiles_dir = <relative or absolute path to the directory that contains the pro
 profile = <dbt profile>
 target = <dbt target>
 dbt_skip_compilation_error = <True or False, default is True>
+populate_relations_cache = <True or False, default is True>
 ```
+
+::: tip NOTE
+
+By default SQLFluff warms dbt's relation cache (one metadata query per
+target schema) before templating. Set `populate_relations_cache = False`, or
+the dbt environment variable `DBT_POPULATE_CACHE=false`, to skip this. If both
+are set, the environment variable takes precedence. Unrecognised values of
+`DBT_POPULATE_CACHE` raise an error. When skipped, dbt falls back to querying
+the warehouse lazily (per schema) on a cache miss, so results are unchanged.
+:::
 
 ::: tip NOTE
 
