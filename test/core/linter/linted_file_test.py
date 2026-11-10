@@ -7,9 +7,41 @@ import pytest
 
 from sqlfluff.core import Linter
 from sqlfluff.core.config import FluffConfig
+from sqlfluff.core.errors import SQLLintError
 from sqlfluff.core.linter import LintedFile
 from sqlfluff.core.linter.patch import FixPatch
-from sqlfluff.core.templaters import RawFileSlice
+from sqlfluff.core.parser import RawSegment
+from sqlfluff.core.parser.markers import PositionMarker
+from sqlfluff.core.rules import LintFix
+from sqlfluff.core.templaters import RawFileSlice, TemplatedFile
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_linted_file_deduplicate_source_only_report(reverse):
+    """Prefer fixable reports over source-only duplicates across variants."""
+    segment = RawSegment(
+        "a", pos_marker=PositionMarker.from_point(0, 0, TemplatedFile.from_string("a"))
+    )
+    rule = mock.Mock(code="LT05")
+    unfixable = SQLLintError(rule=rule, segment=segment, description="Too long")
+    fixable = SQLLintError(
+        rule=rule,
+        segment=segment,
+        description="Too long",
+        fixes=[LintFix.replace(segment, [RawSegment("b")])],
+    )
+    different_fix = SQLLintError(
+        rule=rule,
+        segment=segment,
+        description="Too long",
+        fixes=[LintFix.replace(segment, [RawSegment("c")])],
+    )
+    violations = [unfixable, fixable, fixable, different_fix]
+    if reverse:
+        violations.reverse()
+    expected = [different_fix, fixable] if reverse else [fixable, different_fix]
+    assert LintedFile.deduplicate_in_source_space(violations) == expected
+    assert LintedFile.deduplicate_in_source_space([unfixable, unfixable]) == [unfixable]
 
 
 @pytest.mark.parametrize(

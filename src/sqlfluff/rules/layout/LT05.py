@@ -1,16 +1,25 @@
 """Implementation of Rule LT05."""
 
+from fnmatch import fnmatch
 from typing import cast
 
+from sqlfluff.core.parser import Lexer, RawSegment
+from sqlfluff.core.parser.markers import PositionMarker
 from sqlfluff.core.parser.segments import TemplateSegment
 from sqlfluff.core.rules import LintResult, RuleContext
 from sqlfluff.core.rules.base import BaseRule
 from sqlfluff.core.rules.crawlers import RootOnlyCrawler
+from sqlfluff.core.rules.noqa import IgnoreMask
 from sqlfluff.utils.reflow.sequence import ReflowSequence
 
 
 class Rule_LT05(BaseRule):
-    """Line is too long."""
+    """Line is too long.
+
+    Length is measured in the source file, including template expressions,
+    unrendered template blocks and whitespace removed by template markers.
+    Unrendered template contents are reported without attempting to split them.
+    """
 
     name = "layout.long_lines"
     aliases = ("L016",)
@@ -37,6 +46,11 @@ class Rule_LT05(BaseRule):
             .break_long_lines()
             .get_results()
         )
+        reported_lines = {
+            res.anchor.pos_marker.source_position()[0]
+            for res in results
+            if res.anchor and res.anchor.pos_marker
+        }
 
         # Ignore any comment line if appropriate.
         if self.ignore_comment_lines:
@@ -145,4 +159,142 @@ class Rule_LT05(BaseRule):
                     # loop too.
                     break
 
-        return results
+        unrendered_results, ignored_lines = self._unrendered_line_results(
+            context, reported_lines
+        )
+        return [
+            result
+            for result in results + unrendered_results
+            if not (
+                result.anchor
+                and result.anchor.pos_marker
+                and result.anchor.pos_marker.source_position()[0] in ignored_lines
+            )
+        ]
+
+    def _unrendered_line_results(
+        self, context: RuleContext, reported_lines: set[int]
+    ) -> tuple[list[LintResult], set[int]]:
+        """Check hidden source lines and return source comment exemptions.
+
+        Reflow processes rendered lines and only measures up to the first
+        source newline in a placeholder. Check the physical source lines
+        separately, without attempting to edit template contents.
+
+        Lex hidden SQL with the active dialect so comment exemptions also
+        apply when a template variant does not render the comment.
+        """
+        limit = context.config.get("max_line_length")
+        if not context.templated_file or limit <= 0:
+            return [], set()
+
+        source = context.templated_file.source_str
+        ignored_lines: set[int] = set()
+        if self.ignore_comment_lines:
+            for comment in context.segment.recursive_crawl("comment", "placeholder"):
+                if (
+                    comment.is_type("placeholder")
+                    and cast(TemplateSegment, comment).block_type != "comment"
+                ):
+                    continue
+                assert comment.pos_marker
+                start_line, _ = comment.pos_marker.source_position()
+                end_line, _ = context.templated_file.get_line_pos_of_char_pos(
+                    comment.pos_marker.source_slice.stop - 1, source=True
+                )
+                ignored_lines.update(range(start_line, end_line + 1))
+        if self.ignore_comment_clauses:
+            for clause in context.segment.recursive_crawl(
+                "comment_clause", "comment_equals_clause"
+            ):
+                assert clause.pos_marker
+                line_no, line_pos = clause.pos_marker.source_position()
+                if line_pos < limit:
+                    ignored_lines.add(line_no)
+        results = []
+        source_lexer = None
+        for seg in context.segment.raw_segments:
+            if not seg.is_type("placeholder") or not seg.pos_marker:
+                continue
+            pos = seg.pos_marker.source_slice.start
+            stop = seg.pos_marker.source_slice.stop
+            if self.ignore_comment_lines and cast(TemplateSegment, seg).block_type in (
+                "literal",
+                "skipped_source",
+            ):
+                if source_lexer is None:
+                    source_lexer = Lexer(config=context.config)
+                source_segments, _ = source_lexer.lex(seg.pos_marker.source_str())
+                for comment in source_segments:
+                    if not comment.is_type("comment"):
+                        continue
+                    assert comment.pos_marker
+                    start_line, _ = context.templated_file.get_line_pos_of_char_pos(
+                        pos + comment.pos_marker.source_slice.start, source=True
+                    )
+                    end_line, _ = context.templated_file.get_line_pos_of_char_pos(
+                        pos + comment.pos_marker.source_slice.stop - 1, source=True
+                    )
+                    ignored_lines.update(range(start_line, end_line + 1))
+            if "\n" not in seg.pos_marker.source_str():
+                continue
+            while pos <= stop and pos < len(source):
+                start = source.rfind("\n", 0, pos) + 1
+                end = source.find("\n", pos)
+                if end == -1:
+                    end = len(source)
+                line_no, _ = context.templated_file.get_line_pos_of_char_pos(
+                    start, source=True
+                )
+                length = end - start
+                if (
+                    length > limit
+                    and line_no not in reported_lines
+                    and line_no not in ignored_lines
+                ):
+                    line = source[start:end]
+                    anchor_start = (
+                        start + len(line) - len(line.lstrip(" \t"))
+                        if line.strip()
+                        else start
+                    )
+                    results.append(
+                        LintResult(
+                            anchor=RawSegment(
+                                source[anchor_start:end],
+                                pos_marker=PositionMarker(
+                                    slice(anchor_start, end),
+                                    seg.pos_marker.templated_slice,
+                                    context.templated_file,
+                                ),
+                            ),
+                            description=f"Line is too long ({length} > {limit}).",
+                            source="reflow.long_line",
+                        )
+                    )
+                    reported_lines.add(line_no)
+                pos = end + 1
+        if not results:
+            return [], ignored_lines
+        disable_noqa_except = context.config.get("disable_noqa_except")
+        references = (self.code, self.name, *self.aliases, *self.groups)
+        if disable_noqa_except:
+            if not any(
+                fnmatch(reference, pattern.strip())
+                for reference in references
+                for pattern in disable_noqa_except.split(",")
+            ):
+                return results, ignored_lines
+        elif context.config.get("disable_noqa"):
+            return results, ignored_lines
+        ignore_mask, _ = IgnoreMask.from_source_with_dialect(
+            source,
+            context.dialect,
+            {reference: {self.code} for reference in references},
+        )
+        return [
+            result
+            for result in results
+            if (error := result.to_linting_error(self)) is not None
+            and ignore_mask.ignore_masked_violations([error])
+        ], ignored_lines
