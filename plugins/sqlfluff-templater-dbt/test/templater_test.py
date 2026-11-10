@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -19,6 +20,155 @@ from sqlfluff.core.errors import SQLFluffSkipFile, SQLFluffUserError, SQLTemplat
 from sqlfluff.utils.testing.cli import invoke_assert_code
 from sqlfluff.utils.testing.logging import fluff_log_catcher
 from sqlfluff_templater_dbt.templater import DbtTemplater
+
+
+@pytest.mark.parametrize("use_v2", [False, True, None])
+@pytest.mark.parametrize("catalog_count", [0, 2])
+def test__templater_dbt_catalog_registration(dbt_templater, use_v2, catalog_count):
+    """Register all catalog integrations before parsing, including on cache reuse."""
+    config = mock.Mock()
+    dbt_templater.dbt_config = config
+    catalogs = mock.Mock(
+        spec=["load_catalogs", "load_catalogs_v2", "get_active_write_integration"]
+    )
+    definitions = [mock.sentinel.first_catalog, mock.sentinel.second_catalog][
+        :catalog_count
+    ]
+    integrations = [mock.sentinel.first_integration, mock.sentinel.second_integration][
+        :catalog_count
+    ]
+    loader = catalogs.load_catalogs_v2 if use_v2 else catalogs.load_catalogs
+    loader.return_value = definitions
+    flags = (
+        SimpleNamespace() if use_v2 is None else SimpleNamespace(USE_CATALOGS_V2=use_v2)
+    )
+    adapter = mock.Mock()
+    bridge = (
+        adapter.bridge_v2_catalog if use_v2 else catalogs.get_active_write_integration
+    )
+    bridge.side_effect = integrations
+
+    def load_manifest(runtime_config):
+        assert runtime_config is config
+        assert adapter.add_catalog_integration.call_args_list == [
+            mock.call(integration) for integration in integrations
+        ]
+        return mock.sentinel.manifest
+
+    with (
+        mock.patch.dict("sys.modules", {"dbt.config.catalogs": catalogs}),
+        mock.patch("dbt.flags.get_flags", return_value=flags),
+        mock.patch("dbt.adapters.factory.get_adapter", return_value=adapter),
+        mock.patch("dbt.tracking.do_not_track"),
+        mock.patch(
+            "dbt.parser.manifest.ManifestLoader.get_full_manifest",
+            side_effect=load_manifest,
+        ) as manifest_loader,
+    ):
+        assert dbt_templater.dbt_manifest is mock.sentinel.manifest
+        assert dbt_templater.dbt_manifest is mock.sentinel.manifest
+
+    loader.assert_called_once_with(
+        config.project_root, config.project_name, config.cli_vars
+    )
+    bridge.assert_has_calls([mock.call(catalog) for catalog in definitions])
+    assert bridge.call_count == catalog_count
+    unused_loader = catalogs.load_catalogs if use_v2 else catalogs.load_catalogs_v2
+    unused_loader.assert_not_called()
+    manifest_loader.assert_called_once_with(config)
+
+
+@pytest.mark.parametrize("catalog_module", [None, SimpleNamespace()])
+def test__templater_dbt_catalog_apis_unavailable(dbt_templater, catalog_module):
+    """Older supported dbt versions need no catalog setup."""
+    config = mock.Mock()
+    dbt_templater.dbt_config = config
+    with (
+        mock.patch.dict("sys.modules", {"dbt.config.catalogs": catalog_module}),
+        mock.patch("dbt.adapters.factory.get_adapter") as get_adapter,
+        mock.patch("dbt.tracking.do_not_track"),
+        mock.patch(
+            "dbt.parser.manifest.ManifestLoader.get_full_manifest"
+        ) as manifest_loader,
+    ):
+        assert dbt_templater.dbt_manifest is manifest_loader.return_value
+
+    get_adapter.assert_not_called()
+    manifest_loader.assert_called_once_with(config)
+
+
+@pytest.mark.parametrize("use_v2", [False, True])
+@pytest.mark.parametrize("has_catalogs", [False, True])
+def test__templater_dbt_catalog_file(dbt_templater, tmp_path, use_v2, has_catalogs):
+    """Load actual catalogs.yml files and select the configured write integration."""
+    catalogs = pytest.importorskip("dbt.config.catalogs")
+    if use_v2 and not hasattr(catalogs, "load_catalogs_v2"):
+        pytest.skip("dbt does not support catalogs.yml v2")
+
+    from dbt_common.clients.system import get_env
+    from dbt_common.context import set_invocation_context
+
+    set_invocation_context(get_env())
+    if has_catalogs:
+        catalog_yaml = (
+            "catalogs:\n"
+            "  - name: my_catalog\n"
+            "    type: biglake_metastore\n"
+            "    table_format: iceberg\n"
+            "    config:\n"
+            "      bigquery:\n"
+            "        external_volume: '{{ var(\"volume\") }}'\n"
+            if use_v2
+            else "catalogs:\n"
+            "  - name: my_catalog\n"
+            "    active_write_integration: selected\n"
+            "    write_integrations:\n"
+            "      - name: inactive\n"
+            "        catalog_type: biglake_metastore\n"
+            "      - name: selected\n"
+            "        catalog_type: biglake_metastore\n"
+            "        external_volume: '{{ var(\"volume\") }}'\n"
+        )
+        (tmp_path / "catalogs.yml").write_text(catalog_yaml)
+
+    config = SimpleNamespace(
+        project_root=str(tmp_path),
+        project_name="example",
+        cli_vars={"volume": "gs://my-bucket"},
+    )
+    dbt_templater.dbt_config = config
+    adapter = mock.Mock()
+
+    def load_manifest(runtime_config):
+        assert runtime_config is config
+        assert adapter.add_catalog_integration.call_count == int(has_catalogs)
+        if has_catalogs:
+            if use_v2:
+                catalog = adapter.bridge_v2_catalog.call_args.args[0]
+                assert catalog.name == "my_catalog"
+                assert catalog.config["bigquery"]["external_volume"] == "gs://my-bucket"
+                adapter.add_catalog_integration.assert_called_once_with(
+                    adapter.bridge_v2_catalog.return_value
+                )
+            else:
+                integration = adapter.add_catalog_integration.call_args.args[0]
+                assert integration.name == "my_catalog"
+                assert integration.catalog_name == "selected"
+                assert integration.external_volume == "gs://my-bucket"
+        return mock.sentinel.manifest
+
+    with (
+        mock.patch(
+            "dbt.flags.get_flags", return_value=SimpleNamespace(USE_CATALOGS_V2=use_v2)
+        ),
+        mock.patch("dbt.adapters.factory.get_adapter", return_value=adapter),
+        mock.patch("dbt.tracking.do_not_track"),
+        mock.patch(
+            "dbt.parser.manifest.ManifestLoader.get_full_manifest",
+            side_effect=load_manifest,
+        ),
+    ):
+        assert dbt_templater.dbt_manifest is mock.sentinel.manifest
 
 
 def test__templater_dbt_missing(dbt_templater, project_dir, dbt_fluff_config):

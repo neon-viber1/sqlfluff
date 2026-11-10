@@ -324,7 +324,39 @@ class DbtTemplater(JinjaTemplater):
         # dbt 0.20.* and onward
         from dbt.parser.manifest import ManifestLoader
 
-        return ManifestLoader.get_full_manifest(self.dbt_config)
+        config = self.dbt_config
+        try:
+            from dbt.config.catalogs import (
+                get_active_write_integration,
+                load_catalogs,
+            )
+        except ImportError:
+            pass
+        else:
+            from dbt.adapters.factory import get_adapter
+            from dbt.flags import get_flags
+
+            adapter = get_adapter(config)
+            if getattr(get_flags(), "USE_CATALOGS_V2", False):
+                from dbt.config.catalogs import load_catalogs_v2
+
+                integrations = [
+                    adapter.bridge_v2_catalog(catalog)
+                    for catalog in load_catalogs_v2(
+                        config.project_root, config.project_name, config.cli_vars
+                    )
+                ]
+            else:
+                integrations = [
+                    get_active_write_integration(catalog)
+                    for catalog in load_catalogs(
+                        config.project_root, config.project_name, config.cli_vars
+                    )
+                ]
+            for integration in integrations:
+                adapter.add_catalog_integration(integration)
+
+        return ManifestLoader.get_full_manifest(config)
 
     @cached_property
     def dbt_selector_method(self):
