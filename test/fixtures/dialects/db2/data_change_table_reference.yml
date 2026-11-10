@@ -1,0 +1,396 @@
+# YML test files are auto-generated from SQL files and should not be edited by
+# hand. To help enforce this, the "hash" field in the file must match a hash
+# computed by SQLFluff when running the tests. Please run
+# `python test/generate_parse_fixture_yml.py`  to generate them after adding or
+# altering SQL files.
+_hash: 83bdcebd23acfdb69b60c5135ec364a17fc65e46eaced4209eb64acc7dcaf2ab
+file:
+- statement:
+    select_statement:
+      select_clause:
+        keyword: SELECT
+        select_clause_element:
+          column_reference:
+            naked_identifier: id
+      from_clause:
+        keyword: FROM
+        from_expression:
+          from_expression_element:
+            table_expression:
+              data_change_table_reference:
+              - keyword: FINAL
+              - keyword: TABLE
+              - bracketed:
+                  start_bracket: (
+                  insert_statement:
+                  - keyword: INSERT
+                  - keyword: INTO
+                  - table_reference:
+                      naked_identifier: orders
+                  - bracketed:
+                    - start_bracket: (
+                    - column_reference:
+                        naked_identifier: customer_id
+                    - comma: ','
+                    - column_reference:
+                        naked_identifier: amount
+                    - end_bracket: )
+                  - values_clause:
+                      keyword: VALUES
+                      bracketed:
+                      - start_bracket: (
+                      - expression:
+                          numeric_literal: '42'
+                      - comma: ','
+                      - expression:
+                          numeric_literal: '100'
+                      - end_bracket: )
+                  end_bracket: )
+- statement_terminator: ;
+- statement:
+    select_statement:
+      select_clause:
+        keyword: SELECT
+        select_clause_element:
+          column_reference:
+          - naked_identifier: changed
+          - dot: .
+          - naked_identifier: id
+      from_clause:
+        keyword: FROM
+        from_expression:
+          from_expression_element:
+            table_expression:
+              data_change_table_reference:
+              - keyword: NEW
+              - keyword: TABLE
+              - bracketed:
+                  start_bracket: (
+                  insert_statement:
+                  - keyword: INSERT
+                  - keyword: INTO
+                  - table_reference:
+                    - quoted_identifier: '"sales"'
+                    - dot: .
+                    - quoted_identifier: '"archive_orders"'
+                  - bracketed:
+                    - start_bracket: (
+                    - column_reference:
+                        naked_identifier: id
+                    - comma: ','
+                    - column_reference:
+                        naked_identifier: amount
+                    - end_bracket: )
+                  - select_statement:
+                      select_clause:
+                      - keyword: SELECT
+                      - select_clause_element:
+                          column_reference:
+                            naked_identifier: id
+                      - comma: ','
+                      - select_clause_element:
+                          column_reference:
+                            naked_identifier: amount
+                      from_clause:
+                        keyword: FROM
+                        from_expression:
+                          from_expression_element:
+                            table_expression:
+                              table_reference:
+                                naked_identifier: orders
+                      where_clause:
+                        keyword: WHERE
+                        expression:
+                          column_reference:
+                            naked_identifier: amount
+                          comparison_operator:
+                            raw_comparison_operator: '>'
+                          numeric_literal: '100'
+                  end_bracket: )
+            alias_expression:
+              alias_operator:
+                keyword: AS
+              naked_identifier: changed
+- statement_terminator: ;
+- statement:
+    select_statement:
+      select_clause:
+        keyword: SELECT
+        select_clause_element:
+          wildcard_expression:
+            wildcard_identifier:
+              star: '*'
+      from_clause:
+        keyword: FROM
+        from_expression:
+          from_expression_element:
+            table_expression:
+              data_change_table_reference:
+              - keyword: FINAL
+              - keyword: TABLE
+              - bracketed:
+                  start_bracket: (
+                  update_statement:
+                    keyword: UPDATE
+                    table_reference:
+                      naked_identifier: orders
+                    set_clause_list:
+                      keyword: SET
+                      set_clause:
+                        column_reference:
+                          naked_identifier: amount
+                        comparison_operator:
+                          raw_comparison_operator: '='
+                        expression:
+                          column_reference:
+                            naked_identifier: amount
+                          binary_operator: +
+                          numeric_literal: '10'
+                    where_clause:
+                      keyword: WHERE
+                      expression:
+                        column_reference:
+                          naked_identifier: customer_id
+                        comparison_operator:
+                          raw_comparison_operator: '='
+                        numeric_literal: '42'
+                  end_bracket: )
+      where_clause:
+        keyword: WHERE
+        expression:
+          column_reference:
+            naked_identifier: amount
+          comparison_operator:
+            raw_comparison_operator: '>'
+          numeric_literal: '100'
+      orderby_clause:
+      - keyword: ORDER
+      - keyword: BY
+      - column_reference:
+          naked_identifier: id
+- statement_terminator: ;
+- statement:
+    select_statement:
+      select_clause:
+      - keyword: SELECT
+      - select_clause_element:
+          column_reference:
+            naked_identifier: id
+      - comma: ','
+      - select_clause_element:
+          column_reference:
+            naked_identifier: amount
+      from_clause:
+        keyword: FROM
+        from_expression:
+          from_expression_element:
+            table_expression:
+              data_change_table_reference:
+              - keyword: NEW
+              - keyword: TABLE
+              - bracketed:
+                  start_bracket: (
+                  update_statement:
+                    keyword: UPDATE
+                    table_reference:
+                      naked_identifier: orders
+                    set_clause_list:
+                      keyword: SET
+                      set_clause:
+                        column_reference:
+                          naked_identifier: amount
+                        comparison_operator:
+                          raw_comparison_operator: '='
+                        numeric_literal: '200'
+                    where_clause:
+                      keyword: WHERE
+                      expression:
+                        column_reference:
+                          naked_identifier: id
+                        comparison_operator:
+                          raw_comparison_operator: '='
+                        numeric_literal: '1'
+                  end_bracket: )
+            alias_expression:
+              naked_identifier: changed
+- statement_terminator: ;
+- statement:
+    select_statement:
+      select_clause:
+      - keyword: SELECT
+      - select_clause_element:
+          column_reference:
+          - naked_identifier: previous
+          - dot: .
+          - naked_identifier: id
+      - comma: ','
+      - select_clause_element:
+          column_reference:
+          - naked_identifier: previous
+          - dot: .
+          - naked_identifier: amount
+      from_clause:
+        keyword: FROM
+        from_expression:
+          from_expression_element:
+            table_expression:
+              data_change_table_reference:
+              - keyword: OLD
+              - keyword: TABLE
+              - bracketed:
+                  start_bracket: (
+                  update_statement:
+                    keyword: UPDATE
+                    table_reference:
+                      naked_identifier: orders
+                    set_clause_list:
+                      keyword: SET
+                      set_clause:
+                        column_reference:
+                          naked_identifier: amount
+                        comparison_operator:
+                          raw_comparison_operator: '='
+                        numeric_literal: '300'
+                    where_clause:
+                      keyword: WHERE
+                      expression:
+                        column_reference:
+                          naked_identifier: id
+                        comparison_operator:
+                          raw_comparison_operator: '='
+                        numeric_literal: '2'
+                  end_bracket: )
+            alias_expression:
+              alias_operator:
+                keyword: AS
+              naked_identifier: previous
+- statement_terminator: ;
+- statement:
+    select_statement:
+      select_clause:
+        keyword: select
+        select_clause_element:
+          wildcard_expression:
+            wildcard_identifier:
+              star: '*'
+      from_clause:
+        keyword: from
+        from_expression:
+          from_expression_element:
+            table_expression:
+              data_change_table_reference:
+              - keyword: old
+              - keyword: table
+              - bracketed:
+                  start_bracket: (
+                  delete_statement:
+                    keyword: delete
+                    from_clause:
+                      keyword: from
+                      from_expression:
+                        from_expression_element:
+                          table_expression:
+                            table_reference:
+                              naked_identifier: orders
+                    where_clause:
+                      keyword: where
+                      expression:
+                        column_reference:
+                          naked_identifier: amount
+                        comparison_operator:
+                          raw_comparison_operator: '='
+                        numeric_literal: '0'
+                  end_bracket: )
+- statement_terminator: ;
+- statement:
+    with_compound_statement:
+      keyword: WITH
+      common_table_expression:
+        naked_identifier: inserted
+        keyword: AS
+        bracketed:
+          start_bracket: (
+          select_statement:
+            select_clause:
+              keyword: SELECT
+              select_clause_element:
+                column_reference:
+                - naked_identifier: changed
+                - dot: .
+                - naked_identifier: order_id
+            from_clause:
+              keyword: FROM
+              from_expression:
+                from_expression_element:
+                  table_expression:
+                    data_change_table_reference:
+                    - keyword: FINAL
+                    - keyword: TABLE
+                    - bracketed:
+                        start_bracket: (
+                        insert_statement:
+                        - keyword: INSERT
+                        - keyword: INTO
+                        - table_reference:
+                            naked_identifier: orders
+                        - bracketed:
+                          - start_bracket: (
+                          - column_reference:
+                              naked_identifier: customer_id
+                          - comma: ','
+                          - column_reference:
+                              naked_identifier: amount
+                          - end_bracket: )
+                        - values_clause:
+                          - keyword: VALUES
+                          - bracketed:
+                            - start_bracket: (
+                            - expression:
+                                numeric_literal: '42'
+                            - comma: ','
+                            - expression:
+                                numeric_literal: '100'
+                            - end_bracket: )
+                          - comma: ','
+                          - bracketed:
+                            - start_bracket: (
+                            - expression:
+                                numeric_literal: '43'
+                            - comma: ','
+                            - expression:
+                                numeric_literal: '200'
+                            - end_bracket: )
+                        end_bracket: )
+                  alias_expression:
+                    alias_operator:
+                      keyword: AS
+                    naked_identifier: changed
+                    bracketed:
+                      start_bracket: (
+                      identifier_list:
+                      - naked_identifier: order_id
+                      - comma: ','
+                      - naked_identifier: customer_id
+                      - comma: ','
+                      - naked_identifier: amount
+                      end_bracket: )
+          end_bracket: )
+      select_statement:
+        select_clause:
+          keyword: SELECT
+          select_clause_element:
+            column_reference:
+              naked_identifier: order_id
+        from_clause:
+          keyword: FROM
+          from_expression:
+            from_expression_element:
+              table_expression:
+                table_reference:
+                  naked_identifier: inserted
+        orderby_clause:
+        - keyword: ORDER
+        - keyword: BY
+        - column_reference:
+            naked_identifier: order_id
+- statement_terminator: ;
